@@ -1,17 +1,17 @@
 export const ISLAMIC_TOOLS = [
   {
     name: 'search_quran_by_topic',
-    description: `Search the Quran by topic or keyword. ALWAYS use this tool when the user asks about any Quranic topic, verse, or teaching. NEVER pick surah/ayah from memory. Returns top 3 matching verses with references.`,
+    description: `Search the Quran by topic or keyword using semantic search across all languages. ALWAYS use this tool when the user asks about any Quranic topic, verse, or teaching. NEVER pick surah/ayah from memory. Returns top matching verses with Arabic text and translation in the specified language.`,
     parameters: {
       type: 'object',
       properties: {
         keyword: {
           type: 'string',
-          description: 'Topic to search e.g. patience, prayer, forgiveness, justice',
+          description: 'Topic or concept to search for, e.g. patience, prayer, forgiveness, justice. Use a keyword in any language — the search is cross-lingual.',
         },
-        translation: {
+        language: {
           type: 'string',
-          description: 'Translation edition. Default: en.sahih',
+          description: 'Language code for the translation to return alongside the Arabic text. Detect from the user message. Supported: ar, bn, en, es, fr, id, ru, tr, zh. Default: en',
         },
       },
       required: ['keyword'],

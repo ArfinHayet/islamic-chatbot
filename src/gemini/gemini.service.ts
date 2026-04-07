@@ -134,4 +134,93 @@ export class GeminiService {
       throw new HttpException('Chat service unavailable', HttpStatus.BAD_GATEWAY);
     }
   }
+
+  async *runAgenticLoopStream(
+    systemPrompt: string,
+    history: GeminiMessage[],
+    tools: GeminiTool[],
+  ): AsyncGenerator<string> {
+    const functionDeclarations = tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    })) as unknown as FunctionDeclaration[];
+
+    const model = this.genAI.getGenerativeModel({
+      model: this.chatModel,
+      systemInstruction: systemPrompt,
+      tools: [{ functionDeclarations }],
+      toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.AUTO } },
+    });
+
+    const sdkHistory: Content[] = history.slice(0, -1).map((m) => ({
+      role: m.role,
+      parts: m.parts.map((p) => {
+        if (p.functionCall) return { functionCall: p.functionCall };
+        if (p.functionResponse)
+          return {
+            functionResponse: {
+              name: p.functionResponse.name,
+              response: p.functionResponse.response,
+            },
+          };
+        return { text: p.text ?? '' };
+      }),
+    }));
+
+    const chatSession = model.startChat({ history: sdkHistory });
+    const maxIterations = 10;
+    const lastUserMessage = history[history.length - 1];
+    const userText = lastUserMessage?.parts.find((p) => p.text)?.text ?? '';
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let pendingMessage: any = userText;
+
+    try {
+      for (let i = 0; i < maxIterations; i++) {
+        const streamResult = await chatSession.sendMessageStream(pendingMessage);
+
+        // Iterate stream chunks immediately — yield text as it arrives (true streaming).
+        // If a function-call chunk is detected, break and handle it synchronously.
+        let isFunctionCallTurn = false;
+        for await (const chunk of streamResult.stream) {
+          const chunkParts = chunk.candidates?.[0]?.content?.parts ?? [];
+          if (chunkParts.some((p) => 'functionCall' in p && p.functionCall)) {
+            isFunctionCallTurn = true;
+            break;
+          }
+          const text = chunk.text();
+          if (text) yield text;
+        }
+
+        if (!isFunctionCallTurn) {
+          return; // Text turn fully streamed
+        }
+
+        // Resolve full response to get complete function call args
+        const response = await streamResult.response;
+        const parts = response.candidates?.[0]?.content?.parts ?? [];
+        const funcCallPart = parts.find((p) => 'functionCall' in p && p.functionCall);
+        if (!funcCallPart?.functionCall) return;
+
+        const { name, args } = funcCallPart.functionCall;
+        this.logger.log(`Tool call: ${name}(${JSON.stringify(args)})`);
+
+        const toolResult = await this.mcpService.executeTool(
+          name,
+          args as Record<string, string>,
+        );
+        this.logger.log(`Tool result [${name}]: ${JSON.stringify(toolResult)}`);
+
+        pendingMessage = [
+          { functionResponse: { name, response: { result: JSON.stringify(toolResult) } } },
+        ];
+      }
+
+      throw new Error('Max tool iterations reached');
+    } catch (error) {
+      this.logger.error(`Agentic loop stream failed: ${(error as Error).message}`);
+      throw new HttpException('Chat service unavailable', HttpStatus.BAD_GATEWAY);
+    }
+  }
 }

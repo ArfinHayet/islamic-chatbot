@@ -1,31 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
-
-interface QuranMatch {
-  number: number;
-  text: string;
-  surah: {
-    number: number;
-    name: string;
-    englishName: string;
-  };
-  numberInSurah: number;
-}
-
-interface QuranSearchResponse {
-  data: {
-    count: number;
-    matches: QuranMatch[];
-  };
-}
+import { RagService } from '../rag/rag.service';
 
 interface HadithItem {
   hadithNumber: string | number;
   hadithEnglish: string;
   englishNarrator: string;
   book?: { bookName: string };
-  bookSlug?: string;
 }
 
 interface HadithSearchResponse {
@@ -43,7 +26,8 @@ interface PrayerTimesResponse {
 interface QuranResult {
   reference: string;
   arabicName: string;
-  text: string;
+  text_ar: string;
+  translation: string;
 }
 
 interface HadithResult {
@@ -71,13 +55,24 @@ type ToolResult =
 @Injectable()
 export class McpService {
   private readonly logger = new Logger(McpService.name);
+  private readonly embeddingModel: ReturnType<GoogleGenerativeAI['getGenerativeModel']>;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly ragService: RagService,
+  ) {
+    // Own embedding client — avoids circular dependency (GeminiService already imports McpService)
+    const apiKey = this.configService.get<string>('gemini.apiKey') as string;
+    const modelName =
+      this.configService.get<string>('gemini.embeddingModel') ?? 'gemini-embedding-001';
+    const genAI = new GoogleGenerativeAI(apiKey);
+    this.embeddingModel = genAI.getGenerativeModel({ model: modelName });
+  }
 
   async executeTool(toolName: string, toolInput: Record<string, string>): Promise<ToolResult> {
     switch (toolName) {
       case 'search_quran_by_topic':
-        return this.searchQuranByTopic(toolInput.keyword, toolInput.translation);
+        return this.searchQuranByTopic(toolInput.keyword, toolInput.language);
       case 'search_hadith_by_topic':
         return this.searchHadithByTopic(toolInput.keyword, toolInput.collection);
       case 'get_prayer_times':
@@ -89,21 +84,27 @@ export class McpService {
 
   private async searchQuranByTopic(
     keyword: string,
-    translation = 'en.sahih',
+    language = 'en',
   ): Promise<QuranResult[] | NotFoundResult | ErrorResult> {
     try {
-      const url = `https://api.alquran.cloud/v1/search/${encodeURIComponent(keyword)}/all/${translation}`;
-      const response = await axios.get<QuranSearchResponse>(url);
-      const matches = response.data?.data?.matches ?? [];
+      const embeddingResult = await this.embeddingModel.embedContent({
+        content: { parts: [{ text: keyword }], role: 'user' },
+        outputDimensionality: 768,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+      const embedding: number[] = embeddingResult.embedding.values;
 
-      if (matches.length === 0) {
-        return { found: false, message: `No verses found for: ${keyword}` };
+      const verses = await this.ragService.searchQuranVerses(embedding, language, 5);
+
+      if (verses.length === 0) {
+        return { found: false, message: `No verses found in database for: ${keyword}` };
       }
 
-      return matches.slice(0, 3).map((match) => ({
-        reference: `Surah ${match.surah.englishName} (${match.surah.number}:${match.numberInSurah})`,
-        arabicName: match.surah.name,
-        text: match.text,
+      return verses.map((v) => ({
+        reference: `Surah ${v.chapter_name} (${v.chapter_number}:${v.verse_number})`,
+        arabicName: v.chapter_name,
+        text_ar: v.text_ar,
+        translation: v.translation ?? v.text_ar,
       }));
     } catch (error) {
       this.logger.warn(`Quran search failed for "${keyword}": ${(error as Error).message}`);
@@ -117,7 +118,7 @@ export class McpService {
   ): Promise<HadithResult[] | NotFoundResult | ErrorResult> {
     try {
       const apiKey = this.configService.get<string>('hadith.apiKey');
-      const url = `https://hadithapi.com/api/hadiths/?apiKey=${apiKey}&book=${collection}&paginate=3&keyword=${encodeURIComponent(keyword)}`;
+      const url = `https://hadithapi.com/api/hadiths?apiKey=${apiKey}&hadithEnglish=${encodeURIComponent(keyword)}`;
       const response = await axios.get<HadithSearchResponse>(url);
       const hadiths = response.data?.hadiths?.data ?? [];
 
@@ -145,8 +146,11 @@ export class McpService {
       const response = await axios.get<PrayerTimesResponse>(url);
       return response.data.data.timings;
     } catch (error) {
-      this.logger.warn(`Prayer times lookup failed for ${city}, ${country}: ${(error as Error).message}`);
+      this.logger.warn(
+        `Prayer times lookup failed for ${city}, ${country}: ${(error as Error).message}`,
+      );
       return { error: `Failed to get prayer times: ${(error as Error).message}` };
     }
   }
 }
+

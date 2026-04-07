@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import configuration from './config/configuration';
 import { CacheEntity } from './rag/entities/cache.entity';
+import { QuranVerseEntity } from './rag/entities/quran-verse.entity';
 import { ChatModule } from './chat/chat.module';
 import { GeminiModule } from './gemini/gemini.module';
 import { McpModule } from './mcp/mcp.module';
@@ -21,7 +22,7 @@ import { RagModule } from './rag/rag.module';
         ssl: { rejectUnauthorized: false },
         synchronize: false,
         logging: false,
-        entities: [CacheEntity],
+        entities: [CacheEntity, QuranVerseEntity],
       }),
     }),
     ThrottlerModule.forRootAsync({

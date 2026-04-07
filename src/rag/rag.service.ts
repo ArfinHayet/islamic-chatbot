@@ -3,12 +3,44 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { CacheEntity } from './entities/cache.entity';
+import { QuranVerseEntity } from './entities/quran-verse.entity';
+
+export interface QuranVerseRaw {
+  id: string;
+  chapter_number: number;
+  chapter_name: string;
+  verse_number: number;
+  chapter_type: string;
+  total_verses: number;
+  text_ar: string;
+  text_bn: string | null;
+  text_en: string | null;
+  text_es: string | null;
+  text_fr: string | null;
+  text_id: string | null;
+  text_ru: string | null;
+  text_tr: string | null;
+  text_zh: string | null;
+}
+
+export interface QuranVerseSearchResult {
+  id: string;
+  chapter_name: string;
+  chapter_number: number;
+  verse_number: number;
+  text_ar: string;
+  translation: string | null;
+  similarity: number;
+}
 
 interface CachedResult {
   answer: string;
   similarity: number;
   question: string;
 }
+
+const SUPPORTED_LANG_COLUMNS = new Set(['ar', 'bn', 'en', 'es', 'fr', 'id', 'ru', 'tr', 'zh']);
+const QURAN_SEARCH_THRESHOLD = 0.4;
 
 @Injectable()
 export class RagService implements OnModuleInit {
@@ -17,6 +49,8 @@ export class RagService implements OnModuleInit {
   constructor(
     @InjectRepository(CacheEntity)
     private readonly cacheRepo: Repository<CacheEntity>,
+    @InjectRepository(QuranVerseEntity)
+    private readonly quranVerseRepo: Repository<QuranVerseEntity>,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
   ) {}
@@ -60,7 +94,38 @@ export class RagService implements OnModuleInit {
       ON islamic_cache USING ivfflat (embedding vector_cosine_ops)
       WITH (lists = 100)
     `);
+    await this.ensureQuranVersesTable();
     this.logger.log('Vector extension and cache table ensured');
+  }
+
+  private async ensureQuranVersesTable(): Promise<void> {
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS quran_verses (
+        id VARCHAR(10) PRIMARY KEY,
+        chapter_number INT NOT NULL,
+        chapter_name VARCHAR(150) NOT NULL,
+        verse_number INT NOT NULL,
+        chapter_type VARCHAR(20) NOT NULL,
+        total_verses INT NOT NULL,
+        text_ar TEXT NOT NULL,
+        text_bn TEXT,
+        text_en TEXT,
+        text_es TEXT,
+        text_fr TEXT,
+        text_id TEXT,
+        text_ru TEXT,
+        text_tr TEXT,
+        text_zh TEXT,
+        embedding vector(768),
+        seeded_at TIMESTAMPTZ
+      )
+    `);
+    await this.dataSource.query(`
+      CREATE INDEX IF NOT EXISTS quran_verses_embedding_idx
+      ON quran_verses USING ivfflat (embedding vector_cosine_ops)
+      WITH (lists = 100)
+    `);
+    this.logger.log('Quran verses table ensured');
   }
 
   async searchSimilar(queryEmbedding: number[]): Promise<CachedResult | null> {
@@ -96,5 +161,90 @@ export class RagService implements OnModuleInit {
        VALUES (gen_random_uuid(), $1, $2, $3::vector, NOW())`,
       [question, answer, `[${embedding.join(',')}]`],
     );
+  }
+
+  async searchQuranVerses(
+    queryEmbedding: number[],
+    language: string,
+    limit = 5,
+  ): Promise<QuranVerseSearchResult[]> {
+    // Validate language to prevent SQL injection via column name interpolation
+    const lang = SUPPORTED_LANG_COLUMNS.has(language) ? language : 'en';
+    const col = lang === 'ar' ? 'text_ar' : `text_${lang}`;
+    const embeddingStr = `[${queryEmbedding.join(',')}]`;
+
+    const rows = await this.dataSource.query<
+      Array<{
+        id: string;
+        chapter_name: string;
+        chapter_number: string;
+        verse_number: string;
+        text_ar: string;
+        translation: string | null;
+        similarity: string;
+      }>
+    >(
+      `SELECT
+         id,
+         chapter_name,
+         chapter_number,
+         verse_number,
+         text_ar,
+         ${col} AS translation,
+         1 - (embedding::vector <=> $1::vector) AS similarity
+       FROM quran_verses
+       WHERE embedding IS NOT NULL
+       ORDER BY embedding::vector <=> $1::vector
+       LIMIT $2`,
+      [embeddingStr, limit],
+    );
+
+    return rows
+      .filter((r) => parseFloat(r.similarity) >= QURAN_SEARCH_THRESHOLD)
+      .map((r) => ({
+        id: r.id,
+        chapter_name: r.chapter_name,
+        chapter_number: parseInt(r.chapter_number, 10),
+        verse_number: parseInt(r.verse_number, 10),
+        text_ar: r.text_ar,
+        translation: r.translation,
+        similarity: parseFloat(r.similarity),
+      }));
+  }
+
+  async saveQuranVerse(verse: QuranVerseRaw, embedding: number[]): Promise<void> {
+    await this.dataSource.query(
+      `INSERT INTO quran_verses (
+         id, chapter_number, chapter_name, verse_number, chapter_type, total_verses,
+         text_ar, text_bn, text_en, text_es, text_fr, text_id, text_ru, text_tr, text_zh,
+         embedding, seeded_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::vector,NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        verse.id,
+        verse.chapter_number,
+        verse.chapter_name,
+        verse.verse_number,
+        verse.chapter_type,
+        verse.total_verses,
+        verse.text_ar,
+        verse.text_bn,
+        verse.text_en,
+        verse.text_es,
+        verse.text_fr,
+        verse.text_id,
+        verse.text_ru,
+        verse.text_tr,
+        verse.text_zh,
+        `[${embedding.join(',')}]`,
+      ],
+    );
+  }
+
+  async getSeededVerseIds(): Promise<Set<string>> {
+    const rows = await this.dataSource.query<Array<{ id: string }>>(
+      `SELECT id FROM quran_verses WHERE embedding IS NOT NULL`,
+    );
+    return new Set(rows.map((r) => r.id));
   }
 }
