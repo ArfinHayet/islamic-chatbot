@@ -2,20 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
-import { RagService } from '../rag/rag.service';
-
-interface HadithItem {
-  hadithNumber: string | number;
-  hadithEnglish: string;
-  englishNarrator: string;
-  book?: { bookName: string };
-}
-
-interface HadithSearchResponse {
-  hadiths: {
-    data: HadithItem[];
-  };
-}
+import { RagService, HadithSearchResult } from '../rag/rag.service';
 
 interface PrayerTimesResponse {
   data: {
@@ -32,8 +19,10 @@ interface QuranResult {
 
 interface HadithResult {
   reference: string;
-  narrator: string;
-  text: string;
+  narrator: string | null;
+  text_ar: string;
+  text_en: string | null;
+  grade: string | null;
 }
 
 interface NotFoundResult {
@@ -114,22 +103,34 @@ export class McpService {
 
   private async searchHadithByTopic(
     keyword: string,
-    collection = 'bukhari',
+    collection?: string,
   ): Promise<HadithResult[] | NotFoundResult | ErrorResult> {
     try {
-      const apiKey = this.configService.get<string>('hadith.apiKey');
-      const url = `https://hadithapi.com/api/hadiths?apiKey=${apiKey}&hadithEnglish=${encodeURIComponent(keyword)}`;
-      const response = await axios.get<HadithSearchResponse>(url);
-      const hadiths = response.data?.hadiths?.data ?? [];
+      const embeddingResult = await this.embeddingModel.embedContent({
+        content: { parts: [{ text: keyword }], role: 'user' },
+        outputDimensionality: 768,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+      const embedding: number[] = embeddingResult.embedding.values;
 
-      if (hadiths.length === 0) {
-        return { found: false, message: `No hadith found for: ${keyword}` };
+      const results: HadithSearchResult[] = await this.ragService.searchHadiths(
+        embedding,
+        collection,
+        5,
+      );
+
+      if (results.length === 0) {
+        return { found: false, message: `No hadith found in local database for: ${keyword}` };
       }
 
-      return hadiths.slice(0, 3).map((hadith) => ({
-        reference: `${hadith.book?.bookName ?? collection} Hadith #${hadith.hadithNumber}`,
-        narrator: hadith.englishNarrator,
-        text: hadith.hadithEnglish,
+      return results.map((h) => ({
+        reference: `${h.collection_name} Hadith #${h.hadith_number}${
+          h.chapter_name ? ` — ${h.chapter_name}` : ''
+        }`,
+        narrator: h.narrator_en,
+        text_ar: h.text_ar,
+        text_en: h.text_en,
+        grade: h.grade,
       }));
     } catch (error) {
       this.logger.warn(`Hadith search failed for "${keyword}": ${(error as Error).message}`);
