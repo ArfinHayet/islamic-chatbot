@@ -7,7 +7,7 @@ export const ISLAMIC_TOOLS = [
       properties: {
         keyword: {
           type: 'string',
-          description: 'Topic, concept, or name to search for. ALWAYS use English or Arabic for best semantic match — do NOT pass keywords in other scripts (Bengali, Urdu, etc.). For proper nouns and Islamic figures, use standard English transliteration (e.g. "Dhul-Qarnayn" not "জুলকারনাইন", "Ibrahim" not "ইব্রাহীম", "Maryam" not "মরিয়ম"). For general concepts you may use the concept in English (e.g. patience, prayer, forgiveness, justice, resurrection).',
+          description: 'Topic or concept to search for, e.g. patience, prayer, forgiveness, justice. Use a keyword in any language — the search is cross-lingual.',
         },
         language: {
           type: 'string',
