@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import axios from 'axios';
 import { RagService, HadithSearchResult } from '../rag/rag.service';
+import { GeminiKeyService } from '../rag/services/gemini-key.service';
 
 interface PrayerTimesResponse {
   data: {
@@ -44,18 +45,58 @@ type ToolResult =
 @Injectable()
 export class McpService {
   private readonly logger = new Logger(McpService.name);
-  private readonly embeddingModel: ReturnType<GoogleGenerativeAI['getGenerativeModel']>;
+  private readonly embeddingModelName: string;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly ragService: RagService,
+    private readonly geminiKeyService: GeminiKeyService,
   ) {
-    // Own embedding client — avoids circular dependency (GeminiService already imports McpService)
-    const apiKey = this.configService.get<string>('gemini.apiKey') as string;
-    const modelName =
+    this.embeddingModelName =
       this.configService.get<string>('gemini.embeddingModel') ?? 'gemini-embedding-001';
-    const genAI = new GoogleGenerativeAI(apiKey);
-    this.embeddingModel = genAI.getGenerativeModel({ model: modelName });
+  }
+
+  private isRateLimitError(err: unknown): boolean {
+    const msg = (err as Error)?.message ?? '';
+    return msg.includes('429') || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('quota');
+  }
+
+  /**
+   * Embed text with automatic key rotation on 429 errors.
+   * Tries each available key once before giving up.
+   */
+  private async embedWithRotation(text: string): Promise<number[]> {
+    const stats = await this.geminiKeyService.getStats();
+    const maxAttempts = (stats.total || 1) + 1;
+    let lastError: Error = new Error('No keys tried');
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const row = await this.geminiKeyService.getNextKey();
+      const apiKey = row?.apiKey ?? this.configService.get<string>('gemini.apiKey');
+      if (!apiKey) throw new Error('No Gemini API keys available');
+
+      try {
+        const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+          model: this.embeddingModelName,
+        });
+        const result = await model.embedContent({
+          content: { parts: [{ text }], role: 'user' },
+          outputDimensionality: 768,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+        return result.embedding.values;
+      } catch (err) {
+        lastError = err as Error;
+        if (this.isRateLimitError(err) && row?.id) {
+          this.logger.warn(`MCP embed key ${row.id.slice(0, 8)}… rate-limited, rotating...`);
+          await this.geminiKeyService.markRateLimited(row.id);
+        } else {
+          break;
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   async executeTool(toolName: string, toolInput: Record<string, string>): Promise<ToolResult> {
@@ -76,13 +117,7 @@ export class McpService {
     language = 'en',
   ): Promise<QuranResult[] | NotFoundResult | ErrorResult> {
     try {
-      const embeddingResult = await this.embeddingModel.embedContent({
-        content: { parts: [{ text: keyword }], role: 'user' },
-        outputDimensionality: 768,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-      const embedding: number[] = embeddingResult.embedding.values;
-
+      const embedding = await this.embedWithRotation(keyword);
       const verses = await this.ragService.searchQuranVerses(embedding, language, 5);
 
       if (verses.length === 0) {
@@ -106,13 +141,7 @@ export class McpService {
     collection?: string,
   ): Promise<HadithResult[] | NotFoundResult | ErrorResult> {
     try {
-      const embeddingResult = await this.embeddingModel.embedContent({
-        content: { parts: [{ text: keyword }], role: 'user' },
-        outputDimensionality: 768,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-      const embedding: number[] = embeddingResult.embedding.values;
-
+      const embedding = await this.embedWithRotation(keyword);
       const results: HadithSearchResult[] = await this.ragService.searchHadiths(
         embedding,
         collection,
