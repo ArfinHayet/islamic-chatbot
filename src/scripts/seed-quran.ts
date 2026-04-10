@@ -19,6 +19,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { AppModule } from '../app.module';
 import { RagService, QuranVerseRaw } from '../rag/rag.service';
+import { GeminiKeyService } from '../rag/services/gemini-key.service';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
@@ -104,42 +105,77 @@ function readLocalJsonl(filePath: string): Promise<RawVerseRecord[]> {
   });
 }
 
-async function embedWithRetry(
-  embeddingModel: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+function isRateLimitError(err: unknown): boolean {
+  const msg = ((err as Error).message ?? '').toLowerCase();
+  return msg.includes('429') || msg.includes('quota') || msg.includes('too many requests');
+}
+
+/**
+ * Embeds text using dynamic key rotation:
+ * 1. Tries each active DB key in round-robin order, marking rate-limited ones.
+ * 2. Falls back to the .env GEMINI_API_KEY with exponential backoff once all DB keys are spent.
+ */
+async function embedWithRotation(
+  keyService: GeminiKeyService,
+  fallbackApiKey: string,
+  modelName: string,
   text: string,
 ): Promise<number[]> {
-  let delay = 10_000; // start with 10s on first 429
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  const tried = new Set<string>();
+
+  // --- Try DB keys ---
+  while (true) {
+    const keyData = await keyService.getNextKey();
+    if (!keyData || tried.has(keyData.id)) break;
+    tried.add(keyData.id);
     try {
-      const result = await embeddingModel.embedContent({
-        content: { parts: [{ text }], role: 'user' },
-        outputDimensionality: 768,
+      const result = await new GoogleGenerativeAI(keyData.apiKey)
+        .getGenerativeModel({ model: modelName })
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
+        .embedContent({ content: { parts: [{ text }], role: 'user' }, outputDimensionality: 768 } as any);
       return result.embedding.values;
     } catch (err) {
-      const msg = (err as Error).message ?? '';
-      const is429 = msg.includes('429') || msg.toLowerCase().includes('too many requests');
-      if (is429 && attempt < MAX_RETRIES) {
-        logger.warn(`Rate limited, waiting ${delay / 1000}s before retry ${attempt + 1}/${MAX_RETRIES} ...`);
-        await new Promise((r) => setTimeout(r, delay));
-        delay = Math.min(delay * 2, 120_000); // cap at 2 minutes
+      if (isRateLimitError(err)) {
+        logger.warn(`DB key ${keyData.id.slice(0, 8)}… rate-limited, rotating to next key...`);
+        await keyService.markRateLimited(keyData.id);
         continue;
       }
       throw err;
     }
   }
-  throw new Error('Max retries exceeded');
+
+  // --- Fallback: .env key with exponential backoff ---
+  logger.warn('All DB keys exhausted, falling back to .env GEMINI_API_KEY with backoff...');
+  const fallbackModel = new GoogleGenerativeAI(fallbackApiKey).getGenerativeModel({ model: modelName });
+  let delay = 10_000;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await fallbackModel.embedContent({ content: { parts: [{ text }], role: 'user' }, outputDimensionality: 768 } as any);
+      return result.embedding.values;
+    } catch (err) {
+      if (isRateLimitError(err) && attempt < MAX_RETRIES) {
+        logger.warn(`Fallback key rate-limited, waiting ${delay / 1000}s (retry ${attempt + 1}/${MAX_RETRIES})...`);
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.min(delay * 2, 120_000);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Max retries exceeded on fallback key');
 }
 
 async function processVerse(
   v: RawVerseRecord,
   ragService: RagService,
-  embeddingModel: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  keyService: GeminiKeyService,
+  fallbackApiKey: string,
+  modelName: string,
 ): Promise<{ success: number; skipped: number }> {
   try {
     const embeddingText = buildEmbeddingText(v);
-    const embedding = await embedWithRetry(embeddingModel, embeddingText);
+    const embedding = await embedWithRotation(keyService, fallbackApiKey, modelName, embeddingText);
 
     // Map dataset field names (verse_*) → DB column names (text_*)
     const verseRaw: QuranVerseRaw = {
@@ -176,12 +212,14 @@ async function main(): Promise<void> {
 
   const ragService = app.get(RagService);
   const configService = app.get(ConfigService);
+  const keyService = app.get(GeminiKeyService);
 
-  const apiKey = configService.get<string>('gemini.apiKey') as string;
+  const fallbackApiKey = configService.get<string>('gemini.apiKey') as string;
   const modelName =
     configService.get<string>('gemini.embeddingModel') ?? 'gemini-embedding-001';
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const embeddingModel = genAI.getGenerativeModel({ model: modelName });
+
+  const stats = await keyService.getStats();
+  logger.log(`DB key stats: ${JSON.stringify(stats)}`);
 
   let verses: RawVerseRecord[];
   try {
@@ -210,7 +248,7 @@ async function main(): Promise<void> {
   let totalSkipped = 0;
 
   for (let i = 0; i < pending.length; i++) {
-    const { success, skipped } = await processVerse(pending[i], ragService, embeddingModel);
+    const { success, skipped } = await processVerse(pending[i], ragService, keyService, fallbackApiKey, modelName);
     totalSuccess += success;
     totalSkipped += skipped;
 

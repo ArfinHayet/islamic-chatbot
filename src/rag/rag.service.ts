@@ -68,6 +68,7 @@ export interface HadithSearchResult {
 
 const SUPPORTED_LANG_COLUMNS = new Set(['ar', 'bn', 'en', 'es', 'fr', 'id', 'ru', 'tr', 'zh']);
 const QURAN_SEARCH_THRESHOLD = 0.4;
+const HADITH_SEARCH_THRESHOLD = 0.4;
 
 @Injectable()
 export class RagService implements OnModuleInit {
@@ -284,7 +285,7 @@ export class RagService implements OnModuleInit {
         id VARCHAR(30) PRIMARY KEY,
         collection VARCHAR(30) NOT NULL,
         collection_name VARCHAR(100) NOT NULL,
-        hadith_number INT NOT NULL,
+        hadith_number NUMERIC(10,1) NOT NULL,
         chapter_number INT,
         chapter_name TEXT,
         text_ar TEXT NOT NULL,
@@ -294,6 +295,22 @@ export class RagService implements OnModuleInit {
         embedding vector(768),
         seeded_at TIMESTAMPTZ
       )
+    `);
+    // Migrate existing INT column to NUMERIC(10,1) to support decimal hadith numbers (e.g. 402.2)
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'hadith_entries'
+            AND column_name = 'hadith_number'
+            AND data_type = 'integer'
+        ) THEN
+          ALTER TABLE hadith_entries
+            ALTER COLUMN hadith_number TYPE NUMERIC(10,1)
+            USING hadith_number::NUMERIC(10,1);
+        END IF;
+      END$$
     `);
     await this.dataSource.query(`
       CREATE INDEX IF NOT EXISTS hadith_entries_embedding_idx
@@ -309,7 +326,7 @@ export class RagService implements OnModuleInit {
     limit = 5,
   ): Promise<HadithSearchResult[]> {
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
-    const threshold = this.configService.get<number>('rag.similarityThreshold') ?? 0.85;
+    const threshold = HADITH_SEARCH_THRESHOLD;
 
     const collectionFilter = collection ? `AND collection = $3` : '';
     const params: (string | number)[] = [embeddingStr, limit];
@@ -356,7 +373,7 @@ export class RagService implements OnModuleInit {
         id: r.id,
         collection: r.collection,
         collection_name: r.collection_name,
-        hadith_number: parseInt(r.hadith_number, 10),
+        hadith_number: parseFloat(r.hadith_number),
         chapter_name: r.chapter_name,
         text_ar: r.text_ar,
         text_en: r.text_en,

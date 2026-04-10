@@ -4,10 +4,15 @@ import { RagService } from './rag.service';
 import { CacheEntity } from './entities/cache.entity';
 import { QuranVerseEntity } from './entities/quran-verse.entity';
 import { HadithEntity } from './entities/hadith.entity';
+import { GeminiKeyEntity } from './entities/gemini-key.entity';
+import { GeminiKeyService } from './services/gemini-key.service';
+import { CryptoService } from '../common/services/crypto.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CacheEntity, QuranVerseEntity, HadithEntity])],
-  providers: [RagService],
-  exports: [RagService],
+  imports: [
+    TypeOrmModule.forFeature([CacheEntity, QuranVerseEntity, HadithEntity, GeminiKeyEntity]),
+  ],
+  providers: [RagService, GeminiKeyService, CryptoService],
+  exports: [RagService, GeminiKeyService, CryptoService],
 })
 export class RagModule {}

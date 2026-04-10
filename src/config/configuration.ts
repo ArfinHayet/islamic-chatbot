@@ -2,6 +2,7 @@ export default () => ({
   database: {
     url: process.env.DATABASE_URL,
   },
+  privateKey: process.env.PRIVATE_KEY,
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
     chatModel: 'gemini-2.5-flash',

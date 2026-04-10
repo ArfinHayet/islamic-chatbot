@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 
+gemini-keys.json
+
 # Build output
 dist/
 

@@ -7,6 +7,7 @@ import configuration from './config/configuration';
 import { CacheEntity } from './rag/entities/cache.entity';
 import { QuranVerseEntity } from './rag/entities/quran-verse.entity';
 import { HadithEntity } from './rag/entities/hadith.entity';
+import { GeminiKeyEntity } from './rag/entities/gemini-key.entity';
 import { ChatModule } from './chat/chat.module';
 import { GeminiModule } from './gemini/gemini.module';
 import { McpModule } from './mcp/mcp.module';
@@ -23,7 +24,7 @@ import { RagModule } from './rag/rag.module';
         ssl: { rejectUnauthorized: false },
         synchronize: false,
         logging: false,
-        entities: [CacheEntity, QuranVerseEntity, HadithEntity],
+        entities: [CacheEntity, QuranVerseEntity, HadithEntity, GeminiKeyEntity],
       }),
     }),
     ThrottlerModule.forRootAsync({
