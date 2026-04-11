@@ -63,6 +63,7 @@ export class GeminiService {
 
     for (let attempt = 0; attempt < totalKeys + 1; attempt++) {
       const { id, apiKey } = await this.nextKey();
+      console.log(apiKey);
       try {
         const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
           model: this.embeddingModel,
