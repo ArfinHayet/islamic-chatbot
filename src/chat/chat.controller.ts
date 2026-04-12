@@ -1,5 +1,6 @@
-import { Controller, Post, Get, Body, Res } from '@nestjs/common';
+import { Controller, Post, Get, Body, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
+import { IpDailyLimitGuard } from '../common/guards/ip-daily-limit.guard';
 import { ChatService, ChatResponse } from './chat.service';
 import { ChatDto } from './dto/chat.dto';
 
@@ -13,6 +14,7 @@ export class ChatController {
   }
 
   @Post('stream')
+  @UseGuards(IpDailyLimitGuard)
   async chatStream(@Body() dto: ChatDto, @Res() res: Response): Promise<void> {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
