@@ -73,9 +73,16 @@ export class ChatService {
     private readonly ragService: RagService,
   ) {}
 
+  private normalizeQuery(query: string): string {
+    // Trim whitespace and strip trailing punctuation that doesn't affect meaning:
+    // ? (Latin), ؟ (Arabic), ! (exclamation), । (Bangla/Hindi danda), . (period)
+    return query.trim().replace(/[?؟!।.]+$/u, '').trim();
+  }
+
   async chat(userId: string, message: string): Promise<ChatResponse> {
-    // 1. Generate embedding for incoming message
-    const embedding = await this.geminiService.generateEmbedding(message);
+    // 1. Generate embedding for incoming message (normalized for consistent cache keys)
+    const normalizedMessage = this.normalizeQuery(message);
+    const embedding = await this.geminiService.generateEmbedding(normalizedMessage);
 
     // 2. Search RAG cache
     try {
@@ -118,14 +125,15 @@ export class ChatService {
 
     // 7. Save to cache (non-blocking, log on failure)
     this.ragService
-      .saveToCache(message, reply, embedding)
+      .saveToCache(normalizedMessage, reply, embedding)
       .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
 
     return { reply, source: 'model', similarity: null };
   }
 
   async *chatStream(userId: string, message: string): AsyncGenerator<StreamChunk> {
-    const embedding = await this.geminiService.generateEmbedding(message);
+    const normalizedMessage = this.normalizeQuery(message);
+    const embedding = await this.geminiService.generateEmbedding(normalizedMessage);
 
     // Cache hit — yield full answer as one chunk
     try {
@@ -172,7 +180,7 @@ export class ChatService {
     userHistory.push({ role: 'model', parts: [{ text: fullReply }] });
 
     this.ragService
-      .saveToCache(message, fullReply, embedding)
+      .saveToCache(normalizedMessage, fullReply, embedding)
       .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
 
     yield { type: 'done', source: 'model', similarity: null };
