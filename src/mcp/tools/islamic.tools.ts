@@ -37,12 +37,12 @@ export const ISLAMIC_TOOLS = [
   },
   {
     name: 'get_prayer_times',
-    description: 'Get Islamic prayer times for a specific city and country.',
+    description: 'Get Islamic prayer times for a specific city and country. If the user does not mention a location, use the auto-detected city and country from the USER LOCATION context. Always return time in 12-hour format with am/pm.',
     parameters: {
       type: 'object',
       properties: {
-        city: { type: 'string' },
-        country: { type: 'string' },
+        city: { type: 'string', description: 'City name. Use the auto-detected city if the user did not specify one.' },
+        country: { type: 'string', description: 'Country name. Use the auto-detected country if the user did not specify one.' },
       },
       required: ['city', 'country'],
     },

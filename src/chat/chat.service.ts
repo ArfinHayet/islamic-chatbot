@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { GeminiService, GeminiMessage } from '../gemini/gemini.service';
 import { RagService } from '../rag/rag.service';
 import { ISLAMIC_TOOLS } from '../mcp/tools/islamic.tools';
+import { GeoLocation } from '../common/services/geo.service';
 
-export const ISLAMIC_SYSTEM_PROMPT = `You are an Islamic scholar assistant. You ONLY answer questions related to Islam, including:
+const BASE_SYSTEM_PROMPT = `You are an Islamic scholar assistant. You ONLY answer questions related to Islam, including:
 - Quran, Hadith, Fiqh, Aqeedah, Islamic history
 - Halal/Haram rulings, worship (salah, sawm, zakat, hajj)
 - Islamic ethics, family matters, daily life from an Islamic perspective
@@ -44,6 +45,8 @@ For ANY Islamic question — even if the user does NOT explicitly mention Quran 
 
 3. PRAYER TIMES:
    - ALWAYS call "get_prayer_times" tool when user asks about salah times
+   - If the user does NOT mention a city or country, use the USER LOCATION values provided below (if available)
+   - Do NOT ask the user for their location if it is already detected
 
 ANSWER QUALITY RULES:
 - Always cite exact sources returned by tools (never fabricate references)
@@ -52,6 +55,15 @@ ANSWER QUALITY RULES:
 - Use respectful Islamic language (e.g., Prophet Muhammad ﷺ, SubhanAllah)
 - Your knowledge of Quran and Hadith texts may contain errors. Always trust tool results over your memory.
 - The Quran verse tool performs cross-lingual semantic search — a question in any language will find relevant verses. Trust it.`;
+
+export function buildSystemPrompt(location?: GeoLocation | null): string {
+  if (!location) return BASE_SYSTEM_PROMPT;
+  return (
+    BASE_SYSTEM_PROMPT +
+    `\n\nUSER LOCATION (auto-detected from IP): City: ${location.city}, Country: ${location.country}\n` +
+    `Use this location automatically when calling "get_prayer_times" if the user has not specified a different city or country.`
+  );
+}
 
 export interface ChatResponse {
   reply: string;
@@ -79,7 +91,7 @@ export class ChatService {
     return query.trim().replace(/[?؟!।.]+$/u, '').trim();
   }
 
-  async chat(userId: string, message: string): Promise<ChatResponse> {
+  async chat(userId: string, message: string, location?: GeoLocation | null): Promise<ChatResponse> {
     // 1. Generate embedding for incoming message (normalized for consistent cache keys)
     const normalizedMessage = this.normalizeQuery(message);
     const embedding = await this.geminiService.generateEmbedding(normalizedMessage);
@@ -107,7 +119,7 @@ export class ChatService {
 
     // 4. Run agentic loop
     const reply = await this.geminiService.runAgenticLoop(
-      ISLAMIC_SYSTEM_PROMPT,
+      buildSystemPrompt(location),
       [...userHistory],
       ISLAMIC_TOOLS,
     );
@@ -131,7 +143,7 @@ export class ChatService {
     return { reply, source: 'model', similarity: null };
   }
 
-  async *chatStream(userId: string, message: string): AsyncGenerator<StreamChunk> {
+  async *chatStream(userId: string, message: string, location?: GeoLocation | null): AsyncGenerator<StreamChunk> {
     const normalizedMessage = this.normalizeQuery(message);
     const embedding = await this.geminiService.generateEmbedding(normalizedMessage);
 
@@ -158,7 +170,7 @@ export class ChatService {
     let fullReply = '';
     try {
       for await (const chunk of this.geminiService.runAgenticLoopStream(
-        ISLAMIC_SYSTEM_PROMPT,
+        buildSystemPrompt(location),
         [...userHistory],
         ISLAMIC_TOOLS,
       )) {
