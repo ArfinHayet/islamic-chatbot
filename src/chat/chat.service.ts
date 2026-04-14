@@ -44,9 +44,10 @@ For ANY Islamic question — even if the user does NOT explicitly mention Quran 
    - Format: "[Collection] Hadith #[number]: [tool result text]"
 
 3. PRAYER TIMES:
-   - ALWAYS call "get_prayer_times" tool when user asks about salah times
-   - If the user does NOT mention a city or country, use the USER LOCATION values provided below (if available)
-   - Do NOT ask the user for their location if it is already detected
+   - ALWAYS call "get_prayer_times" tool when user asks about salah/prayer times
+   - NEVER ask the user for their city or country — it is auto-detected and will appear in the USER LOCATION section below
+   - Use the USER LOCATION city and country DIRECTLY as arguments to "get_prayer_times" WITHOUT asking the user
+   - Only ask for location if the USER LOCATION section is completely absent AND the user has not mentioned a city or country
 
 ANSWER QUALITY RULES:
 - Always cite exact sources returned by tools (never fabricate references)
@@ -60,8 +61,11 @@ export function buildSystemPrompt(location?: GeoLocation | null): string {
   if (!location) return BASE_SYSTEM_PROMPT;
   return (
     BASE_SYSTEM_PROMPT +
-    `\n\nUSER LOCATION (auto-detected from IP): City: ${location.city}, Country: ${location.country}\n` +
-    `Use this location automatically when calling "get_prayer_times" if the user has not specified a different city or country.`
+    `\n\n--- USER LOCATION (auto-detected) ---\n` +
+    `City: ${location.city}\n` +
+    `Country: ${location.country}\n` +
+    `IMPORTANT: Use this city and country DIRECTLY when calling "get_prayer_times". Do NOT ask the user for their location.\n` +
+    `--- END USER LOCATION ---`
   );
 }
 

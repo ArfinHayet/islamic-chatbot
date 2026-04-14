@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 
 interface IpApiResponse {
@@ -29,10 +30,19 @@ function isPrivateIp(ip: string): boolean {
 export class GeoService {
   private readonly logger = new Logger(GeoService.name);
 
+  constructor(private readonly configService: ConfigService) {}
+
+  private getDefaultLocation(): GeoLocation | null {
+    const city = this.configService.get<string>('location.defaultCity');
+    const country = this.configService.get<string>('location.defaultCountry');
+    if (city && country) return { city, country };
+    return null;
+  }
+
   async getLocationFromIp(ip: string): Promise<GeoLocation | null> {
     if (isPrivateIp(ip)) {
-      this.logger.debug(`Skipping geo lookup for private/local IP: ${ip}`);
-      return null;
+      this.logger.debug(`Private/local IP detected (${ip}), using default location fallback`);
+      return this.getDefaultLocation();
     }
 
     try {
@@ -47,6 +57,6 @@ export class GeoService {
       this.logger.warn(`Geo lookup failed for IP ${ip}: ${(err as Error).message}`);
     }
 
-    return null;
+    return this.getDefaultLocation();
   }
 }

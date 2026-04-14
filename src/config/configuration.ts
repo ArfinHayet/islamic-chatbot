@@ -11,6 +11,10 @@ export default () => ({
   hadith: {
     apiKey: process.env.HADITH_API_KEY,
   },
+  location: {
+    defaultCity: process.env.DEFAULT_CITY ?? '',
+    defaultCountry: process.env.DEFAULT_COUNTRY ?? '',
+  },
   rag: {
     similarityThreshold: parseFloat(process.env.SIMILARITY_THRESHOLD || '0.85'),
     maxCacheSearch: parseInt(process.env.MAX_CACHE_SEARCH || '500'),
