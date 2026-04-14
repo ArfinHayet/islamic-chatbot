@@ -101,15 +101,37 @@ export class ChatService {
    */
   private isPrayerTimeQuery(message: string): boolean {
     const lower = message.toLowerCase();
+
     // English
     if (/prayer\s*time|salah\s*time|namaz\s*time|salat\s*time/.test(lower)) return true;
-    // Bengali (Banglish + Unicode)
-    if (/namajer\s*(somoy|time|waqt)|namaz\s*(somoy|time)|নামাজের\s*সময়|নামাযের\s*সময়/.test(lower)) return true;
+
+    // Banglish (romanised Bengali)
+    if (/namajer\s*(somoy|time|waqt|oqt)|namaz\s*(somoy|time|waqt)|azan\s*(somoy|time)/.test(lower)) return true;
+
+    // Bengali Unicode — general prayer-time phrases
+    // covers: নামাজের সময়, নামাযের সময়, সালাতের সময়, আজকের নামাজ, নামাজের ওয়াক্ত, আজানের সময়
+    if (/নামাজের\s*সময়|নামাযের\s*সময়|সালাতের\s*সময়/.test(message)) return true;
+    if (/নামাজের\s*ওয়াক্ত|নামাযের\s*ওয়াক্ত|আজানের\s*সময়/.test(message)) return true;
+    if (/আজকের\s*নামাজ|আজকের\s*সালাত/.test(message)) return true;
+
+    // Bengali Unicode — specific salah names in genitive/possessive form + time word
+    // e.g. "ফজরের সময় কত", "এশার নামাজ কখন"
+    if (/(ফজরের|যোহরের|জোহরের|আসরের|মাগরিবের|মাগরেবের|এশার|ইশার)\s*(সময়|নামাজ|নামায|ওয়াক্ত)/.test(message)) return true;
+
     // Arabic
-    if (/وقت\s*(الصلاة|صلاة)|مواقيت\s*الصلاة/.test(message)) return true;
-    // Generic time-of-prayer keywords across languages
-    if (/(fajr|dhuhr|zuhr|asr|maghrib|isha|magrib|এশা|ফজর|যোহর|আসর|মাগরিব).*?(time|somoy|waqt|سময়|وقت)/.test(lower)) return true;
-    if (/(time|somoy|waqt).*?(fajr|dhuhr|zuhr|asr|maghrib|isha|magrib|এশা|ফজর|যোহর|আসর|মাগরিব)/.test(lower)) return true;
+    if (/وقت\s*(الصلاة|صلاة)|مواقيت\s*الصلاة|أوقات\s*الصلاة/.test(message)) return true;
+
+    // Turkish
+    if (/namaz\s*vakti|ezan\s*vakti/.test(lower)) return true;
+
+    // Indonesian / Malay
+    if (/waktu\s*sholat|waktu\s*salat|jadwal\s*sholat|jadwal\s*salat/.test(lower)) return true;
+
+    // Generic: salah-name keywords combined with time words (any language)
+    const prayerNames = /fajr|subuh|dhuhr|zuhr|zuhur|asr|ashar|maghrib|magrib|isha|isya|এশা|ফজর|যোহর|জোহর|আসর|মাগরিব/;
+    const timeWords = /time|somoy|waqt|vakti|waktu|وقت|সময়|ওয়াক্ত/;
+    if (prayerNames.test(lower) && timeWords.test(lower)) return true;
+
     return false;
   }
 
