@@ -95,20 +95,41 @@ export class ChatService {
     return query.trim().replace(/[?؟!।.]+$/u, '').trim();
   }
 
+  /**
+   * Returns true if the message is asking about prayer/salah times.
+   * These are real-time queries and must never be served from cache.
+   */
+  private isPrayerTimeQuery(message: string): boolean {
+    const lower = message.toLowerCase();
+    // English
+    if (/prayer\s*time|salah\s*time|namaz\s*time|salat\s*time/.test(lower)) return true;
+    // Bengali (Banglish + Unicode)
+    if (/namajer\s*(somoy|time|waqt)|namaz\s*(somoy|time)|নামাজের\s*সময়|নামাযের\s*সময়/.test(lower)) return true;
+    // Arabic
+    if (/وقت\s*(الصلاة|صلاة)|مواقيت\s*الصلاة/.test(message)) return true;
+    // Generic time-of-prayer keywords across languages
+    if (/(fajr|dhuhr|zuhr|asr|maghrib|isha|magrib|এশা|ফজর|যোহর|আসর|মাগরিব).*?(time|somoy|waqt|سময়|وقت)/.test(lower)) return true;
+    if (/(time|somoy|waqt).*?(fajr|dhuhr|zuhr|asr|maghrib|isha|magrib|এশা|ফজর|যোহর|আসর|মাগরিব)/.test(lower)) return true;
+    return false;
+  }
+
   async chat(userId: string, message: string, location?: GeoLocation | null): Promise<ChatResponse> {
     // 1. Generate embedding for incoming message (normalized for consistent cache keys)
     const normalizedMessage = this.normalizeQuery(message);
-    const embedding = await this.geminiService.generateEmbedding(normalizedMessage);
+    const skipCache = this.isPrayerTimeQuery(message);
+    const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
 
-    // 2. Search RAG cache
-    try {
-      const cached = await this.ragService.searchSimilar(embedding);
-      if (cached) {
-        this.logger.log(`Cache hit for user ${userId}: similarity=${cached.similarity}`);
-        return { reply: cached.answer, source: 'cache', similarity: cached.similarity };
+    // 2. Search RAG cache (skip for real-time queries like prayer times)
+    if (!skipCache) {
+      try {
+        const cached = await this.ragService.searchSimilar(embedding);
+        if (cached) {
+          this.logger.log(`Cache hit for user ${userId}: similarity=${cached.similarity}`);
+          return { reply: cached.answer, source: 'cache', similarity: cached.similarity };
+        }
+      } catch (err) {
+        this.logger.warn(`Cache search failed, falling through to model: ${(err as Error).message}`);
       }
-    } catch (err) {
-      this.logger.warn(`Cache search failed, falling through to model: ${(err as Error).message}`);
     }
 
     // 3. Build history for this user (keep last 10 messages)
@@ -139,29 +160,34 @@ export class ChatService {
     // 6. Add assistant reply to history
     userHistory.push({ role: 'model', parts: [{ text: reply }] });
 
-    // 7. Save to cache (non-blocking, log on failure)
-    this.ragService
-      .saveToCache(normalizedMessage, reply, embedding)
-      .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
+    // 7. Save to cache (skip for real-time queries like prayer times)
+    if (!skipCache) {
+      this.ragService
+        .saveToCache(normalizedMessage, reply, embedding)
+        .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
+    }
 
     return { reply, source: 'model', similarity: null };
   }
 
   async *chatStream(userId: string, message: string, location?: GeoLocation | null): AsyncGenerator<StreamChunk> {
     const normalizedMessage = this.normalizeQuery(message);
-    const embedding = await this.geminiService.generateEmbedding(normalizedMessage);
+    const skipCache = this.isPrayerTimeQuery(message);
+    const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
 
-    // Cache hit — yield full answer as one chunk
-    try {
-      const cached = await this.ragService.searchSimilar(embedding);
-      if (cached) {
-        this.logger.log(`Cache hit for user ${userId}: similarity=${cached.similarity}`);
-        yield { type: 'chunk', text: cached.answer };
-        yield { type: 'done', source: 'cache', similarity: cached.similarity };
-        return;
+    // Cache hit — yield full answer as one chunk (skip for real-time queries)
+    if (!skipCache) {
+      try {
+        const cached = await this.ragService.searchSimilar(embedding);
+        if (cached) {
+          this.logger.log(`Cache hit for user ${userId}: similarity=${cached.similarity}`);
+          yield { type: 'chunk', text: cached.answer };
+          yield { type: 'done', source: 'cache', similarity: cached.similarity };
+          return;
+        }
+      } catch (err) {
+        this.logger.warn(`Cache search failed, falling through to model: ${(err as Error).message}`);
       }
-    } catch (err) {
-      this.logger.warn(`Cache search failed, falling through to model: ${(err as Error).message}`);
     }
 
     // Build history
@@ -195,9 +221,11 @@ export class ChatService {
 
     userHistory.push({ role: 'model', parts: [{ text: fullReply }] });
 
-    this.ragService
-      .saveToCache(normalizedMessage, fullReply, embedding)
-      .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
+    if (!skipCache) {
+      this.ragService
+        .saveToCache(normalizedMessage, fullReply, embedding)
+        .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
+    }
 
     yield { type: 'done', source: 'model', similarity: null };
   }
