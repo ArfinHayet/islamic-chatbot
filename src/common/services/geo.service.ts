@@ -50,6 +50,8 @@ export class GeoService {
         `https://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,city,country`,
         { timeout: 3000 },
       );
+
+      this.logger.debug(`Geo lookup for IP ${ip} returned: ${JSON.stringify(response)}`);
       if (response.data.status === 'success' && response.data.city && response.data.country) {
         return { city: response.data.city, country: response.data.country };
       }

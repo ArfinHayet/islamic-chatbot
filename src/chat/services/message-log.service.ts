@@ -17,15 +17,32 @@ export class MessageLogService {
     response: string | null;
     source: string;
   }): Promise<void> {
-    try {
-      await this.repo.save(this.repo.create(data));
-    } catch (error) {
-      // Log the error to the console or a logger service
-      // You can replace console.error with a proper logger if available
-      console.error('Failed to log message:', {
-        data,
-        error: error instanceof Error ? error.message : error,
-      });
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await this.repo.insert(this.repo.create(data));
+        return;
+      } catch (error) {
+        const isLastAttempt = attempt === maxAttempts;
+
+        console.error('Failed to log message:', {
+          attempt,
+          maxAttempts,
+          data,
+          error: error instanceof Error ? error.message : error,
+        });
+
+        if (isLastAttempt) {
+          throw error;
+        }
+
+        await this.delay(attempt * 100);
+      }
     }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

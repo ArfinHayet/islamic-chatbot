@@ -14,25 +14,35 @@ export class ChatController {
     private readonly messageLogService: MessageLogService,
   ) {}
 
+  private async persistMessageLog(data: {
+    userId: string;
+    ipAddress: string;
+    message: string;
+    response: string | null;
+    source: string;
+  }): Promise<void> {
+    try {
+      await this.messageLogService.log(data);
+    } catch (error) {
+      console.error('Failed to log chat message:', {
+        data,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   @Post()
   async chat(@Body() dto: ChatDto, @Req() req: Request): Promise<ChatResponse> {
     const ip = req.ip ?? '';
     const location = await this.geoService.getLocationFromIp(ip);
     const result = await this.chatService.chat(dto.userId, dto.message, location);
-    try {
-      await this.messageLogService.log({
-        userId: dto.userId,
-        ipAddress: ip,
-        message: dto.message,
-        response: result.reply,
-        source: result.source,
-      });
-    } catch (error) {
-      // Log the error to the console or a logger service
-      console.error('Failed to log chat message:', {
-        error: error instanceof Error ? error.message : error,
-      });
-    }
+    await this.persistMessageLog({
+      userId: dto.userId,
+      ipAddress: ip,
+      message: dto.message,
+      response: result.reply,
+      source: result.source,
+    });
     return result;
   }
 
@@ -47,6 +57,7 @@ export class ChatController {
     res.flushHeaders();
     const chunks: string[] = [];
     let source = 'model';
+    let responseText: string | null = null;
     try {
       for await (const event of this.chatService.chatStream(dto.userId, dto.message, location)) {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -54,22 +65,25 @@ export class ChatController {
         if (event.type === 'done') source = event.source;
       }
     } catch (err) {
+      responseText = chunks.join('') || null;
       res.write(`data: ${JSON.stringify({ type: 'error', message: (err as Error).message })}\n\n`);
     } finally {
-      res.end();
-      try {
-        await this.messageLogService.log({
-          userId: dto.userId,
-          ipAddress: ip,
-          message: dto.message,
-          response: chunks.join('') || null,
-          source,
-        });
-      } catch (error) {
-        // Log the error to the console or a logger service
-        console.error('Failed to log chat stream message:', {
-          error: error instanceof Error ? error.message : error,
-        });
+      await this.persistMessageLog({
+        userId: dto.userId,
+        ipAddress: ip,
+        message: dto.message,
+        response: responseText ?? (chunks.join('') || null),
+        source,
+      });
+
+      if (!res.writableEnded) {
+        try {
+          res.end();
+        } catch (error) {
+          console.error('Failed to end chat stream response:', {
+            error: error instanceof Error ? error.message : error,
+          });
+        }
       }
     }
   }
