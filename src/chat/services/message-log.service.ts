@@ -17,6 +17,15 @@ export class MessageLogService {
     response: string | null;
     source: string;
   }): Promise<void> {
-    await this.repo.save(this.repo.create(data));
+    try {
+      await this.repo.save(this.repo.create(data));
+    } catch (error) {
+      // Log the error to the console or a logger service
+      // You can replace console.error with a proper logger if available
+      console.error('Failed to log message:', {
+        data,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
   }
 }
