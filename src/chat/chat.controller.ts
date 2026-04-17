@@ -1,10 +1,15 @@
-import { Controller, Post, Get, Body, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Req, Res, UseGuards, Query } from '@nestjs/common';
 import { Request, Response } from 'express';
+import axios from 'axios';
 import { IpDailyLimitGuard } from '../common/guards/ip-daily-limit.guard';
 import { ChatService, ChatResponse } from './chat.service';
 import { ChatDto } from './dto/chat.dto';
 import { GeoService } from '../common/services/geo.service';
 import { MessageLogService } from './services/message-log.service';
+
+interface PrayerTimesResponse {
+  data: unknown;
+}
 
 @Controller('chat')
 export class ChatController {
@@ -91,5 +96,27 @@ export class ChatController {
   @Get('health')
   health(): { status: string; timestamp: string } {
     return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
+  @Get('prayer-times')
+  async getPrayerTimes(
+    @Query('city') city: string,
+    @Query('country') country: string,
+  ): Promise<Array<{ '1': unknown; '0': unknown }>> {
+    const [schoolOneResponse, schoolZeroResponse] = await Promise.all([
+      axios.get<PrayerTimesResponse>(
+        `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&school=1`,
+      ),
+      axios.get<PrayerTimesResponse>(
+        `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&school=0`,
+      ),
+    ]);
+
+    return [
+      {
+        '1': schoolOneResponse.data,
+        '0': schoolZeroResponse.data,
+      },
+    ];
   }
 }
