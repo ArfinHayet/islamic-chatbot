@@ -1,11 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { IncomingHttpHeaders } from 'http';
 
 interface IpApiResponse {
   status: 'success' | 'fail';
   city: string;
   country: string;
+  message?: string;
 }
 
 export interface GeoLocation {
@@ -26,6 +28,21 @@ function isPrivateIp(ip: string): boolean {
   );
 }
 
+function getHeaderValue(headers: IncomingHttpHeaders | undefined, key: string): string | null {
+  const value = headers?.[key];
+
+  if (typeof value === 'string') {
+    return value.trim() || null;
+  }
+
+  if (Array.isArray(value)) {
+    const firstValue = value.find((item) => item.trim());
+    return firstValue ? firstValue.trim() : null;
+  }
+
+  return null;
+}
+
 @Injectable()
 export class GeoService {
   private readonly logger = new Logger(GeoService.name);
@@ -39,7 +56,18 @@ export class GeoService {
     return null;
   }
 
-  async getLocationFromIp(ip: string): Promise<GeoLocation | null> {
+  async getLocationFromIp(ip: string, headers?: IncomingHttpHeaders): Promise<GeoLocation | null> {
+    const vercelCity = getHeaderValue(headers, 'x-vercel-ip-city');
+    const vercelCountry = getHeaderValue(headers, 'x-vercel-ip-country');
+
+    this.logger.log(
+      `Vercel geo headers for IP ${ip}: city=${vercelCity ?? 'n/a'}, country=${vercelCountry ?? 'n/a'}`,
+    );
+
+    if (vercelCity && vercelCountry) {
+      return { city: vercelCity, country: vercelCountry };
+    }
+
     if (isPrivateIp(ip)) {
       this.logger.debug(`Private/local IP detected (${ip}), using default location fallback`);
       return this.getDefaultLocation();
@@ -47,14 +75,18 @@ export class GeoService {
 
     try {
       const response = await axios.get<IpApiResponse>(
-        `https://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,city,country`,
+        `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,city,country`,
         { timeout: 3000 },
       );
 
-      this.logger.debug(`Geo lookup for IP ${ip} returned: ${JSON.stringify(response)}`);
+      this.logger.debug(`Geo lookup for IP ${ip} returned: ${JSON.stringify(response.data)}`);
       if (response.data.status === 'success' && response.data.city && response.data.country) {
         return { city: response.data.city, country: response.data.country };
       }
+
+      this.logger.warn(
+        `Geo lookup returned no usable location for IP ${ip}: ${response.data.message ?? 'unknown failure'}`,
+      );
     } catch (err) {
       this.logger.warn(`Geo lookup failed for IP ${ip}: ${(err as Error).message}`);
     }

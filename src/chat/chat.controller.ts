@@ -34,7 +34,7 @@ export class ChatController {
   @Post()
   async chat(@Body() dto: ChatDto, @Req() req: Request): Promise<ChatResponse> {
     const ip = req.ip ?? '';
-    const location = await this.geoService.getLocationFromIp(ip);
+    const location = await this.geoService.getLocationFromIp(ip, req.headers);
     const result = await this.chatService.chat(dto.userId, dto.message, location);
     await this.persistMessageLog({
       userId: dto.userId,
@@ -50,7 +50,7 @@ export class ChatController {
   @UseGuards(IpDailyLimitGuard)
   async chatStream(@Body() dto: ChatDto, @Req() req: Request, @Res() res: Response): Promise<void> {
     const ip = req.ip ?? '';
-    const location = await this.geoService.getLocationFromIp(ip);
+    const location = await this.geoService.getLocationFromIp(ip, req.headers);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
