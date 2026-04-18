@@ -6,18 +6,41 @@ import { ChatService, ChatResponse } from './chat.service';
 import { ChatDto } from './dto/chat.dto';
 import { GeoService } from '../common/services/geo.service';
 import { MessageLogService } from './services/message-log.service';
+import { log } from 'console';
 
 interface PrayerTimesResponse {
   data: unknown;
 }
 
+type CachedPrayerTimesResponse = Array<{ '1': unknown; '0': unknown }>;
+
 @Controller('chat')
 export class ChatController {
+  private prayerTimesCache = new Map<string, CachedPrayerTimesResponse>();
+  private prayerTimesCacheDate = this.getCacheDateKey();
+
   constructor(
     private readonly chatService: ChatService,
     private readonly geoService: GeoService,
     private readonly messageLogService: MessageLogService,
   ) {}
+
+  private getCacheDateKey(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  private clearPrayerTimesCacheIfDateChanged(): void {
+    const currentDate = this.getCacheDateKey();
+
+    if (this.prayerTimesCacheDate !== currentDate) {
+      this.prayerTimesCache.clear();
+      this.prayerTimesCacheDate = currentDate;
+    }
+  }
+
+  private getPrayerTimesCacheKey(city: string, country: string): string {
+    return `${city.trim().toLowerCase()}::${country.trim().toLowerCase()}`;
+  }
 
   private async persistMessageLog(data: {
     userId: string;
@@ -103,6 +126,16 @@ export class ChatController {
     @Query('city') city: string,
     @Query('country') country: string,
   ): Promise<Array<{ '1': unknown; '0': unknown }>> {
+    this.clearPrayerTimesCacheIfDateChanged();
+
+    const cacheKey = this.getPrayerTimesCacheKey(city, country);
+    const cachedPrayerTimes = this.prayerTimesCache.get(cacheKey);
+
+    if (cachedPrayerTimes) {
+      this,log('Returning cached prayer times for', { city, country });
+      return cachedPrayerTimes;
+    }
+
     const [schoolOneResponse, schoolZeroResponse] = await Promise.all([
       axios.get<PrayerTimesResponse>(
         `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&school=1`,
@@ -112,11 +145,15 @@ export class ChatController {
       ),
     ]);
 
-    return [
+    const prayerTimesResponse = [
       {
         '1': schoolOneResponse.data,
         '0': schoolZeroResponse.data,
       },
     ];
+
+    this.prayerTimesCache.set(cacheKey, prayerTimesResponse);
+
+    return prayerTimesResponse;
   }
 }
