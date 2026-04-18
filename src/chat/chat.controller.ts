@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Req, Res, UseGuards, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Post, Get, Body, Req, Res, UseGuards, Query } from '@nestjs/common';
 import { Request, Response } from 'express';
 import axios from 'axios';
 import { IpDailyLimitGuard } from '../common/guards/ip-daily-limit.guard';
@@ -6,7 +6,6 @@ import { ChatService, ChatResponse } from './chat.service';
 import { ChatDto } from './dto/chat.dto';
 import { GeoService } from '../common/services/geo.service';
 import { MessageLogService } from './services/message-log.service';
-import { log } from 'console';
 
 interface PrayerTimesResponse {
   data: unknown;
@@ -16,6 +15,7 @@ type CachedPrayerTimesResponse = Array<{ '1': unknown; '0': unknown }>;
 
 @Controller('chat')
 export class ChatController {
+  private static readonly PRAYER_TIMES_CACHE_TIME_ZONE = 'Asia/Dhaka';
   private prayerTimesCache = new Map<string, CachedPrayerTimesResponse>();
   private prayerTimesCacheDate = this.getCacheDateKey();
 
@@ -26,7 +26,14 @@ export class ChatController {
   ) {}
 
   private getCacheDateKey(): string {
-    return new Date().toISOString().slice(0, 10);
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: ChatController.PRAYER_TIMES_CACHE_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+
+    return formatter.format(new Date());
   }
 
   private clearPrayerTimesCacheIfDateChanged(): void {
@@ -38,8 +45,12 @@ export class ChatController {
     }
   }
 
+  private normalizePrayerTimesQueryParam(value?: string): string {
+    return value?.trim().toLowerCase() ?? '';
+  }
+
   private getPrayerTimesCacheKey(city: string, country: string): string {
-    return `${city.trim().toLowerCase()}::${country.trim().toLowerCase()}`;
+    return `${this.normalizePrayerTimesQueryParam(city)}::${this.normalizePrayerTimesQueryParam(country)}`;
   }
 
   private async persistMessageLog(data: {
@@ -123,25 +134,33 @@ export class ChatController {
 
   @Get('prayer-times')
   async getPrayerTimes(
-    @Query('city') city: string,
-    @Query('country') country: string,
+    @Req() req: Request,
+    @Query('city') city?: string,
+    @Query('country') country?: string,
   ): Promise<Array<{ '1': unknown; '0': unknown }>> {
     this.clearPrayerTimesCacheIfDateChanged();
 
-    const cacheKey = this.getPrayerTimesCacheKey(city, country);
+    const location = await this.geoService.getLocationFromIp(req.ip ?? '', req.headers);
+    const normalizedCity = city?.trim() || location?.city?.trim();
+    const normalizedCountry = country?.trim() || location?.country?.trim();
+
+    if (!normalizedCity || !normalizedCountry) {
+      throw new BadRequestException('Unable to determine city and country from the request.');
+    }
+
+    const cacheKey = this.getPrayerTimesCacheKey(normalizedCity, normalizedCountry);
     const cachedPrayerTimes = this.prayerTimesCache.get(cacheKey);
 
     if (cachedPrayerTimes) {
-      this,log('Returning cached prayer times for', { city, country });
       return cachedPrayerTimes;
     }
 
     const [schoolOneResponse, schoolZeroResponse] = await Promise.all([
       axios.get<PrayerTimesResponse>(
-        `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&school=1`,
+        `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(normalizedCity)}&country=${encodeURIComponent(normalizedCountry)}&school=1`,
       ),
       axios.get<PrayerTimesResponse>(
-        `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(city)}&country=${encodeURIComponent(country)}&school=0`,
+        `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(normalizedCity)}&country=${encodeURIComponent(normalizedCountry)}&school=0`,
       ),
     ]);
 
