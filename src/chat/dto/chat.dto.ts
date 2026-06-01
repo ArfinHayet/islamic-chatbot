@@ -1,4 +1,5 @@
 import { IsString, IsNotEmpty, MinLength, MaxLength, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class ChatDto {
   @IsString()
@@ -24,4 +25,20 @@ export class TurnstilePassDto {
   @IsString()
   @IsNotEmpty()
   captchaToken: string;
+}
+
+export class ChatTtsDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(4000)
+  text: string;
+
+  @IsString()
+  @IsOptional()
+  captchaToken?: string;
+
+  @IsString()
+  @IsOptional()
+  captchaPass?: string;
 }
