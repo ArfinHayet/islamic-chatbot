@@ -1,5 +1,6 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import {
   GoogleGenerativeAI,
   Content,
@@ -33,10 +34,24 @@ export type AgenticStreamEvent =
   | { type: 'chunk'; text: string }
   | { type: 'media'; media: unknown };
 
+interface GeminiTtsResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        inlineData?: {
+          data?: string;
+          mimeType?: string;
+        };
+      }>;
+    };
+  }>;
+}
+
 @Injectable()
 export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
   private readonly chatModel: string;
+  private readonly ttsModel: string;
   private readonly embeddingModel: string;
 
   constructor(
@@ -45,6 +60,8 @@ export class GeminiService {
     private readonly geminiKeyService: GeminiKeyService,
   ) {
     this.chatModel = this.configService.get<string>('gemini.chatModel') ?? 'gemini-2.5-flash';
+    this.ttsModel =
+      this.configService.get<string>('gemini.ttsModel') ?? 'gemini-2.5-flash-preview-tts';
     this.embeddingModel =
       this.configService.get<string>('gemini.embeddingModel') ?? 'gemini-embedding-001';
   }
@@ -101,6 +118,106 @@ export class GeminiService {
 
     this.logger.error(`Embedding generation failed: ${lastError.message}`);
     throw new HttpException('Embedding service unavailable', HttpStatus.SERVICE_UNAVAILABLE);
+  }
+
+  async generateSpeech(text: string): Promise<Buffer> {
+    const totalKeys = (await this.geminiKeyService.getStats()).total || 1;
+    let lastError: Error = new Error('No keys tried');
+
+    for (let attempt = 0; attempt < totalKeys + 1; attempt++) {
+      const { id, apiKey } = await this.nextKey();
+
+      try {
+        return await this.generateSpeechWithKey(text, apiKey);
+      } catch (err) {
+        lastError = err as Error;
+        if (this.isRateLimitError(err) && id) {
+          this.logger.warn(`TTS key ${id.slice(0, 8)}... rate-limited, rotating...`);
+          await this.geminiKeyService.markRateLimited(id);
+        } else {
+          break;
+        }
+      }
+    }
+
+    this.logger.error(`Speech generation failed: ${lastError.message}`);
+    throw new HttpException('Speech service unavailable', HttpStatus.BAD_GATEWAY);
+  }
+
+  private async generateSpeechWithKey(text: string, apiKey: string): Promise<Buffer> {
+    const isBengali = /[\u0980-\u09FF]/.test(text);
+    const voiceName = isBengali ? 'Kore' : 'Puck';
+    const languageInstruction = isBengali
+      ? 'Read aloud in a warm, natural Bangladeshi Bengali voice. Do not read Markdown symbols or formatting.'
+      : 'Read aloud in a clear, natural English voice. Do not read Markdown symbols or formatting.';
+
+    const response = await axios.post<GeminiTtsResponse>(
+      `https://generativelanguage.googleapis.com/v1beta/models/${this.ttsModel}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        contents: [
+          {
+            parts: [
+              {
+                text: `${languageInstruction}\n\n${text}`,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName,
+              },
+            },
+          },
+        },
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+
+    const inlineData = response.data.candidates?.[0]?.content?.parts?.find(
+      (part) => part.inlineData?.data,
+    )?.inlineData;
+
+    if (!inlineData?.data) {
+      throw new Error('Gemini TTS response did not include audio data');
+    }
+
+    const audioBuffer = Buffer.from(inlineData.data, 'base64');
+    if (inlineData.mimeType?.includes('wav')) return audioBuffer;
+
+    return this.wrapPcmInWav(audioBuffer);
+  }
+
+  private wrapPcmInWav(
+    pcmBuffer: Buffer,
+    sampleRate = 24000,
+    channels = 1,
+    bitsPerSample = 16,
+  ): Buffer {
+    const byteRate = (sampleRate * channels * bitsPerSample) / 8;
+    const blockAlign = (channels * bitsPerSample) / 8;
+    const header = Buffer.alloc(44);
+
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + pcmBuffer.length, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(pcmBuffer.length, 40);
+
+    return Buffer.concat([header, pcmBuffer]);
   }
 
   async runAgenticLoop(

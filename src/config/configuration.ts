@@ -6,6 +6,7 @@ export default () => ({
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
     chatModel: 'gemini-2.5-flash',
+    ttsModel: process.env.GEMINI_TTS_MODEL || 'gemini-2.5-flash-preview-tts',
     embeddingModel: 'gemini-embedding-001',
   },
   hadith: {

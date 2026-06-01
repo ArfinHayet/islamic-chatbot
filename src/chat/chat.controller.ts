@@ -5,9 +5,10 @@ import { IpDailyLimitGuard } from '../common/guards/ip-daily-limit.guard';
 import { SupabaseAdminGuard } from '../common/guards/supabase-admin.guard';
 import { TurnstilePass, TurnstileService } from '../common/services/turnstile.service';
 import { ChatService, ChatResponse } from './chat.service';
-import { ChatDto, TurnstilePassDto } from './dto/chat.dto';
+import { ChatDto, ChatTtsDto, TurnstilePassDto } from './dto/chat.dto';
 import { GeoService } from '../common/services/geo.service';
 import { MessageLogListResult, MessageLogService } from './services/message-log.service';
+import { GeminiService } from '../gemini/gemini.service';
 
 interface PrayerTimesResponse {
   data: unknown;
@@ -23,6 +24,7 @@ export class ChatController {
 
   constructor(
     private readonly chatService: ChatService,
+    private readonly geminiService: GeminiService,
     private readonly geoService: GeoService,
     private readonly messageLogService: MessageLogService,
     private readonly turnstileService: TurnstileService,
@@ -73,7 +75,7 @@ export class ChatController {
     }
   }
 
-  private async verifyChatAccess(dto: ChatDto, ip: string): Promise<void> {
+  private async verifyChatAccess(dto: Pick<ChatDto, 'captchaPass' | 'captchaToken'>, ip: string): Promise<void> {
     await this.turnstileService.verifyAccess({
       captchaPass: dto.captchaPass,
       captchaToken: dto.captchaToken,
@@ -145,6 +147,20 @@ export class ChatController {
         }
       }
     }
+  }
+
+  @Post('tts')
+  @UseGuards(IpDailyLimitGuard)
+  async textToSpeech(@Body() dto: ChatTtsDto, @Req() req: Request, @Res() res: Response): Promise<void> {
+    const ip = req.ip ?? '';
+    await this.verifyChatAccess(dto, ip);
+
+    const audio = await this.geminiService.generateSpeech(dto.text);
+
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Content-Length', audio.length.toString());
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.end(audio);
   }
 
   @Get('health')
