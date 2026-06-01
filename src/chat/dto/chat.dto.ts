@@ -28,7 +28,10 @@ export class TurnstilePassDto {
 }
 
 export class ChatTtsDto {
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ obj, value }) => {
+    const rawValue = value ?? obj?.content ?? obj?.message;
+    return typeof rawValue === 'string' ? rawValue.trim() : rawValue;
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(4000)
@@ -36,9 +39,15 @@ export class ChatTtsDto {
 
   @IsString()
   @IsOptional()
+  userId?: string;
+
+  @IsString()
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   captchaToken?: string;
 
   @IsString()
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   captchaPass?: string;
 }

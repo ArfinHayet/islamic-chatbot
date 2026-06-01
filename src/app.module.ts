@@ -37,7 +37,7 @@ import { RagModule } from './rag/rag.module';
         throttlers: [
           {
             ttl: config.get<number>('throttle.ttl') ?? 60000,
-            limit: config.get<number>('throttle.limit') ?? 20,
+            limit: config.get<number>('throttle.limit') ?? 10,
           },
         ],
       }),
