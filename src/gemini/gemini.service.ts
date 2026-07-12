@@ -420,12 +420,17 @@ export class GeminiService {
       parameters: t.parameters,
     })) as unknown as FunctionDeclaration[];
 
-    const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+    const modelOptions: any = {
       model: this.chatModel,
       systemInstruction: systemPrompt,
-      tools: [{ functionDeclarations }],
-      toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.AUTO } },
-    });
+    };
+
+    if (functionDeclarations.length > 0) {
+      modelOptions.tools = [{ functionDeclarations }];
+      modelOptions.toolConfig = { functionCallingConfig: { mode: FunctionCallingMode.AUTO } };
+    }
+
+    const model = new GoogleGenerativeAI(apiKey).getGenerativeModel(modelOptions);
 
     // Exclude the last user message from history — it will be sent via sendMessage
     const sdkHistory: Content[] = history.slice(0, -1).map((m) => ({
@@ -524,12 +529,17 @@ export class GeminiService {
       parameters: t.parameters,
     })) as unknown as FunctionDeclaration[];
 
-    const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+    const modelOptions: any = {
       model: this.chatModel,
       systemInstruction: systemPrompt,
-      tools: [{ functionDeclarations }],
-      toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.AUTO } },
-    });
+    };
+
+    if (functionDeclarations.length > 0) {
+      modelOptions.tools = [{ functionDeclarations }];
+      modelOptions.toolConfig = { functionCallingConfig: { mode: FunctionCallingMode.AUTO } };
+    }
+
+    const model = new GoogleGenerativeAI(apiKey).getGenerativeModel(modelOptions);
 
     const sdkHistory: Content[] = history.slice(0, -1).map((m) => ({
       role: m.role,

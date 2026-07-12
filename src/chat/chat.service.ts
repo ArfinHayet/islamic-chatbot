@@ -211,6 +211,18 @@ export class ChatService {
     return query.trim().replace(/[?؟!।.]+$/u, '').trim();
   }
 
+  private addToHistory(userId: string, userText: string, modelText: string): void {
+    if (!this.history.has(userId)) {
+      this.history.set(userId, []);
+    }
+    const userHistory = this.history.get(userId) as GeminiMessage[];
+    userHistory.push({ role: 'user', parts: [{ text: userText }] });
+    userHistory.push({ role: 'model', parts: [{ text: modelText }] });
+    if (userHistory.length > 10) {
+      userHistory.splice(0, userHistory.length - 10);
+    }
+  }
+
   private async getDirectQuranRecitation(message: string, language = 'en'): Promise<ChatResponse> {
     const result = await this.mcpService.executeTool('get_quran_recitation', {
       surahName: message,
@@ -278,7 +290,9 @@ export class ChatService {
 
     // 2. Short-circuit: Quran recitation — fetch audio directly without the full agentic loop
     if (intent === 'quran_recitation') {
-      return this.getDirectQuranRecitation(message, language);
+      const result = await this.getDirectQuranRecitation(message, language);
+      this.addToHistory(userId, message, result.reply);
+      return result;
     }
 
     // 3. Determine whether to skip the RAG cache (real-time or media intents)
@@ -342,6 +356,7 @@ export class ChatService {
     // 2. Short-circuit: Quran recitation
     if (intent === 'quran_recitation') {
       const result = await this.getDirectQuranRecitation(message, language);
+      this.addToHistory(userId, message, result.reply);
       if (result.media) yield { type: 'media', media: result.media };
       yield { type: 'chunk', text: result.reply };
       yield { type: 'done', source: result.source, similarity: result.similarity, media: result.media };
