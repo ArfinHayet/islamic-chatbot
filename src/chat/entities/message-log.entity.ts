@@ -20,6 +20,9 @@ export class MessageLogEntity {
   @Column({ type: 'varchar', length: 10, default: 'model' })
   source: string | undefined;
 
+  @Column({ type: 'text', nullable: true })
+  failureReason: string | null | undefined;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date | undefined;
 }

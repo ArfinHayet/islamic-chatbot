@@ -34,6 +34,35 @@ export type AgenticStreamEvent =
   | { type: 'chunk'; text: string }
   | { type: 'media'; media: unknown };
 
+/**
+ * Represents the detected intent of a user's message.
+ * - `quran_recitation` — user wants to hear/play/recite a Quran surah
+ * - `prayer_time`      — user asks for salah/namaz/prayer times
+ * - `hijri_calendar`   — user asks about Hijri dates, Ramadan, Eid, or Islamic calendar
+ * - `greeting`         — greetings, introductions, "how are you", "what can you do"
+ * - `off_topic`        — questions with zero plausible Islamic angle (weather, code, sports scores…)
+ * - `general`          — any Islamic question incl. borderline ones; also the safe fallback on error
+ */
+export type MessageIntent =
+  | 'quran_recitation'
+  | 'prayer_time'
+  | 'hijri_calendar'
+  | 'greeting'
+  | 'off_topic'
+  | 'general';
+
+/** The supported language codes — mirrors the codes in the main system prompt. */
+export type SupportedLanguage = 'ar' | 'bn' | 'en' | 'es' | 'fr' | 'id' | 'ru' | 'tr' | 'zh';
+
+/**
+ * The structured result returned by `classifyIntent()`.
+ * Both fields are always present; `language` defaults to `'en'` on any parse failure.
+ */
+export interface IntentResult {
+  intent: MessageIntent;
+  language: SupportedLanguage;
+}
+
 interface GeminiTtsResponse {
   candidates?: Array<{
     content?: {
@@ -53,6 +82,7 @@ export class GeminiService {
   private readonly chatModel: string;
   private readonly ttsModel: string;
   private readonly embeddingModel: string;
+  private readonly intentModel: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -64,6 +94,8 @@ export class GeminiService {
       this.configService.get<string>('gemini.ttsModel') ?? 'gemini-2.5-flash-preview-tts';
     this.embeddingModel =
       this.configService.get<string>('gemini.embeddingModel') ?? 'gemini-embedding-001';
+    this.intentModel =
+      this.configService.get<string>('gemini.intentModel') ?? 'gemini-2.5-flash';
   }
 
   /** Fetch next available key from DB; fall back to .env */
@@ -86,6 +118,135 @@ export class GeminiService {
   private isRateLimitError(err: unknown): boolean {
     const msg = (err as Error)?.message ?? '';
     return msg.includes('429') || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('quota');
+  }
+
+  /**
+   * Classifies the intent of a user message using the main Gemini model (`gemini-2.5-flash`).
+   * Using the full model ensures robust multilingual understanding — lightweight models
+   * were found to misclassify greetings and identity questions in non-English languages.
+   *
+   * Returns an `IntentResult` with:
+   *   - `intent`   — one of 6 labels (see `MessageIntent`)
+   *   - `language` — ISO-639-1 code of the detected message language (one of the 9 supported codes)
+   *
+   * On any error (network, rate-limit, parse failure) it logs a warning and returns
+   * `{ intent: 'general', language: 'en' }` so the main chat path is never blocked.
+   */
+  async classifyIntent(message: string): Promise<IntentResult> {
+    const VALID_INTENTS: MessageIntent[] = [
+      'quran_recitation',
+      'prayer_time',
+      'hijri_calendar',
+      'greeting',
+      'off_topic',
+      'general',
+    ];
+    const VALID_LANGUAGES: SupportedLanguage[] = ['ar', 'bn', 'en', 'es', 'fr', 'id', 'ru', 'tr', 'zh'];
+    const FALLBACK: IntentResult = { intent: 'general', language: 'en' };
+
+    const systemPrompt = [
+      'You are an intent classification engine for an Islamic assistant chatbot called Noor AI.',
+      'Given the user message, return a JSON object with two fields: "intent" and "language".',
+      '',
+      'INTENT — choose exactly one:',
+      '  - quran_recitation : user wants to hear, play, recite, or listen to a Quran surah (tilawah/qirat/قراءة)',
+      '  - prayer_time      : user asks for salah, namaz, or prayer times in any language',
+      '  - hijri_calendar   : user asks about Hijri dates, Ramadan, Eid, Shawwal, Dhul Hijjah, or calendar conversion',
+      '  - greeting         : ONLY pure social greetings and simple opener questions.',
+      '                       INCLUDES: hello, hi, hey, salam, السلام عليكم, আস্সালামু আলাইকুম,',
+      '                       merhaba, bonjour, hola, привет, 你好, and equivalents in any language.',
+      '                       INCLUDES: "who are you?", "what is your name?", "introduce yourself",',
+      '                       "how are you?", "how are you doing?", "what\'s up?", small talk.',
+      '                       Bengali: "তুমি কে?", "কেমন আছেন?", "আপনার নাম কি?"',
+      '                       Arabic: "من أنت؟", "ما اسمك؟", "كيف حالك؟"',
+      '                       DOES NOT include questions needing a real answer:',
+      '                       "where does your knowledge come from?", "what are your limitations?",',
+      '                       "how do you work?", "what can you NOT do?", "are you accurate?",',
+      '                       "কোথা থেকে তোমার জ্ঞান আসে?", "তুমি কী কী পারো না?" — these are general.',
+      '  - off_topic        : question has ZERO plausible Islamic angle — e.g. "What is 2+2?",',
+      '                       "Write Python code", "Who won the football match?", "What is the weather?",',
+      '                       "Tell me a joke", "Write a movie script"',
+      '  - general          : EVERYTHING ELSE — including:',
+      '                       • Any question with a plausible Islamic dimension (afterlife, Jannah, ethics, history)',
+      '                       • Questions about Noor AI that need a real answer beyond a simple intro:',
+      '                         "where does your knowledge come from?", "what are your limitations?",',
+      '                         "how do you work?", "what is your knowledge source?", "can you make mistakes?",',
+      '                         "are you always accurate?", "what topics can you help with?"',
+      '                       • "ki kora jai ekhane?", "what can I ask you?", capability deep-dives',
+      '                       • ANY borderline case — when in doubt, use general.',,
+      '',
+      'LANGUAGE — detect the language the user wrote in and map it to one of:',
+      '  ar (Arabic), bn (Bengali), en (English), es (Spanish), fr (French),',
+      '  id (Indonesian/Malay), ru (Russian), tr (Turkish), zh (Chinese).',
+      '  If it does not match any, use "en".',
+      '',
+      'Rules:',
+      '  • Return ONLY: { "intent": "<label>", "language": "<code>" }',
+      '  • No explanation, no markdown, no extra keys.',
+    ].join('\n');
+
+    const totalKeys = (await this.geminiKeyService.getStats()).total || 1;
+
+    for (let attempt = 0; attempt < totalKeys + 1; attempt++) {
+      let id: string | null = null;
+      try {
+        const key = await this.nextKey();
+        id = key.id;
+
+        const model = new GoogleGenerativeAI(key.apiKey).getGenerativeModel({
+          model: this.intentModel,
+          systemInstruction: systemPrompt,
+          generationConfig: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            responseMimeType: 'application/json' as any,
+            responseSchema: {
+              type: 'object' as any,
+              properties: {
+                intent: {
+                  type: 'string' as any,
+                  enum: VALID_INTENTS,
+                },
+                language: {
+                  type: 'string' as any,
+                  enum: VALID_LANGUAGES,
+                },
+              },
+              required: ['intent', 'language'],
+            } as any,
+            temperature: 0,
+          },
+        });
+
+        const result = await model.generateContent(message);
+        const raw = result.response.text().trim();
+        const parsed = JSON.parse(raw) as { intent?: string; language?: string };
+
+        const intent = (VALID_INTENTS as string[]).includes(parsed?.intent ?? '')
+          ? (parsed.intent as MessageIntent)
+          : null;
+        const language = (VALID_LANGUAGES as string[]).includes(parsed?.language ?? '')
+          ? (parsed.language as SupportedLanguage)
+          : 'en';
+
+        if (!intent) {
+          this.logger.warn(`classifyIntent: unexpected intent "${String(parsed?.intent)}" — falling back to general`);
+          return { intent: 'general', language };
+        }
+
+        return { intent, language };
+      } catch (err) {
+        if (this.isRateLimitError(err) && id) {
+          this.logger.warn(`Intent key ${id.slice(0, 8)}… rate-limited, rotating...`);
+          await this.geminiKeyService.markRateLimited(id);
+          continue;
+        }
+        this.logger.warn(`classifyIntent failed: ${(err as Error).message} — falling back to general`);
+        return FALLBACK;
+      }
+    }
+
+    this.logger.warn('classifyIntent: all keys exhausted — falling back to general');
+    return FALLBACK;
   }
 
   async generateEmbedding(text: string): Promise<number[]> {

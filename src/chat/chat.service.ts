@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GeminiService, GeminiMessage } from '../gemini/gemini.service';
+import { GeminiService, GeminiMessage, IntentResult } from '../gemini/gemini.service';
 import { RagService } from '../rag/rag.service';
 import { ISLAMIC_TOOLS } from '../mcp/tools/islamic.tools';
 import { McpService } from '../mcp/mcp.service';
@@ -11,10 +11,41 @@ const BASE_SYSTEM_PROMPT = `You are an Islamic scholar assistant. You ONLY answe
 - Islamic ethics, family matters, daily life from an Islamic perspective
 - Prophets, companions, Islamic scholars
 
-STRICT DOMAIN RULE:
-If the question is NOT related to Islam in any way, respond ONLY with:
-"I'm only able to answer Islamic questions. Please ask something related to Islam."
-Do NOT answer it. Do NOT make exceptions.
+DOMAIN RULE:
+Answer questions from an Islamic perspective. ANY question that has a plausible Islamic angle
+— including the afterlife, Jannah, Jahannam, the soul, ethics, human rights, the purpose of
+life, historical figures, social matters, or human nature — MUST be answered using Quran and
+Hadith evidence via the search tools.
+
+Only respond with "I'm only able to answer Islamic questions. Please ask something related to
+Islam." when the question has ABSOLUTELY NO conceivable Islamic dimension, such as:
+"What is 2+2?", "Write me Python code", "Who won the football match?", or "What is the weather?"
+
+When in doubt, answer from an Islamic lens. Always cite Quran and Hadith via the search tools.
+
+IDENTITY & GREETINGS:
+If the user greets you (hello, hi, salam, السلام عليكم, আস্সালামু আলাইকুম, merhaba, etc.)
+OR asks a simple identity question ("who are you?", "what are you?", "what is your name?",
+"introduce yourself"), respond warmly in the user's language:
+- Name: Noor AI
+- Created by: A dedicated team of developers — NOT Google, NOT OpenAI, NOT any specific company
+- Purpose: An Islamic assistant that answers based on the Quran and authentic Hadith
+- Capabilities: Prayer times, Hijri calendar, Quran recitation, Islamic rulings & history
+Do NOT refuse these as off-topic. Do NOT call any search tools for a pure greeting.
+
+META-QUESTIONS (about Noor AI's knowledge, accuracy, or how it works):
+If the user asks "where does your knowledge come from?", "what is your knowledge source?",
+"how do you know this?", "can you make mistakes?", "what are your limitations?",
+"are you always accurate?", "how were you trained?", "are you better than ChatGPT?",
+or similar in ANY language — answer honestly and specifically WITHOUT calling search tools:
+- My knowledge comes from the Quran and authentic Hadith collections (Sahih Bukhari, Sahih Muslim,
+  Abu Dawud, Tirmidhi, Nasai, Ibn Majah, and others).
+- For every Islamic question I search these sources in real time — I do not rely on general
+  internet knowledge, personal opinion, or fabricated references.
+- I can make mistakes. Always verify important rulings with a qualified Islamic scholar.
+- I do not issue personal fatwas.
+- I cannot help with topics unrelated to Islam (weather, programming, sports, etc.).
+Respond conversationally in the user's language. Do NOT call any search tools for meta-questions.
 
 LANGUAGE DETECTION:
 - Detect the language the user is writing in.
@@ -88,6 +119,34 @@ export function buildSystemPrompt(location?: GeoLocation | null): string {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Pre-written localised responses (bypasses the agentic loop entirely)
+// ---------------------------------------------------------------------------
+
+const GREETING_RESPONSES: Record<string, string> = {
+  en: `As-salāmu ʿalaykum! 🌙 I'm **Noor AI** — your Islamic assistant.\n\nI can help you with:\n• Questions based on the **Quran** and **authentic Hadith**\n• **Prayer times** for your location\n• **Hijri calendar**, Ramadan & Eid dates\n• **Quran recitation** — just ask me to recite any Surah\n• Any Islamic ruling, history, or guidance\n\nFeel free to ask anything Islamic — in any language!`,
+  bn: `আস্সালামু আলাইকুম! 🌙 আমি **Noor AI** — আপনার ইসলামিক সহকারী।\n\nআমি যেসব বিষয়ে সাহায্য করতে পারি:\n• **কুরআন** ও **সহীহ হাদীস**-ভিত্তিক প্রশ্নের উত্তর\n• আপনার অবস্থান অনুযায়ী **নামাজের সময়**\n• **হিজরি ক্যালেন্ডার**, রমজান ও ঈদের তারিখ\n• **সূরা তেলাওয়াত** — যেকোনো সূরা শুনতে চাইলেই বলুন\n• যেকোনো ইসলামিক বিধি-বিধান, ইতিহাস বা গাইডেন্স\n\nযেকোনো ইসলামিক প্রশ্ন করুন — যেকোনো ভাষায়!`,
+  ar: `وعليكم السلام ورحمة الله وبركاته! 🌙 أنا **Noor AI** — مساعدك الإسلامي.\n\nيمكنني مساعدتك في:\n• الأسئلة المبنية على **القرآن الكريم** و**الحديث الصحيح**\n• **أوقات الصلاة** لموقعك\n• **التقويم الهجري** ومواعيد رمضان والعيد\n• **تلاوة القرآن** — فقط اطلب أي سورة\n• أي حكم إسلامي أو تاريخ أو توجيه\n\nاسأل ما تشاء بأي لغة!`,
+  tr: `Aleykümselam! 🌙 Ben **Noor AI** — İslami asistanınız.\n\nYardımcı olabileceklerim:\n• **Kuran** ve **sahih hadis** kaynaklı sorular\n• Konumunuza göre **namaz vakitleri**\n• **Hicri takvim**, Ramazan ve Bayram tarihleri\n• **Sure tilaveti** — istediğiniz sureyi okuyabilirim\n• Her türlü İslami hüküm, tarih veya rehberlik\n\nHerhangi bir dilde İslami sorularınızı sorabilirsiniz!`,
+  id: `Wa'alaikumsalam! 🌙 Saya **Noor AI** — asisten Islam Anda.\n\nSaya bisa membantu:\n• Pertanyaan berdasarkan **Al-Quran** dan **Hadis sahih**\n• **Jadwal sholat** sesuai lokasi Anda\n• **Kalender Hijriyah**, tanggal Ramadan & Idul Fitri/Adha\n• **Tilawah surah** — minta saja surah apa pun\n• Hukum Islam, sejarah, atau panduan apa pun\n\nSilakan tanya apa saja seputar Islam — dalam bahasa apa pun!`,
+  es: `¡Wa alaykum as-salam! 🌙 Soy **Noor AI** — tu asistente islámico.\n\nPuedo ayudarte con:\n• Preguntas basadas en el **Corán** y el **hadiz auténtico**\n• **Horarios de oración** según tu ubicación\n• **Calendario hijri**, fechas de Ramadán y ʿId\n• **Recitación de suras** — sólo pide cualquier sura\n• Cualquier norma islámica, historia o guía\n\n¡Pregunta lo que quieras en cualquier idioma!`,
+  fr: `Wa alaykum as-salam ! 🌙 Je suis **Noor AI** — votre assistant islamique.\n\nJe peux vous aider avec :\n• Des questions basées sur le **Coran** et les **hadiths authentiques**\n• Les **horaires de prière** selon votre localisation\n• Le **calendrier hijri**, les dates du Ramadan et de l’Aïd\n• La **récitation de sourates** — demandez n’importe quelle sourate\n• Toute règle islamique, histoire ou guidance\n\nPosez librement vos questions islamiques — dans n’importe quelle langue !`,
+  ru: `Ва-алейкум ас-салям! 🌙 Я **Noor AI** — ваш исламский помощник.\n\nЯ могу помочь с:\n• Вопросами на основе **Корана** и **достоверных хадисов**\n• **Временем намаза** для вашего местоположения\n• **Исламским календарём**, датами Рамадана и Ид\n• **Чтением сур** — просто попросите любую суру\n• Любым исламским положением, историей или руководством\n\nЗадавайте любые исламские вопросы на любом языке!`,
+  zh: `وعليكم السلام！🌙 我是 **Noor AI** — 您的伊斯兰助手。\n\n我可以帮助您：\n• 基于**古兰经**和**可靠圣训**的问题解答\n• 根据您所在位置的**礼拜时间**\n• **伊斯兰历**、斋月和开斋节日期\n• **古兰经诵读** — 随时请求任何章节\n• 任何伊斯兰律例、历史或指导\n\n欢迎用任何语言提问！`,
+};
+
+const OFF_TOPIC_RESPONSES: Record<string, string> = {
+  en: `I'm **Noor AI**, an Islamic assistant. I can only help with questions related to Islam — the Quran, Hadith, prayer times, Hijri dates, and Islamic guidance. Please feel free to ask an Islamic question!`,
+  bn: `আমি **Noor AI**, একটি ইসলামিক সহকারী। আমি শুধুমাত্র ইসলাম, কুরআন, হাদীস, নামাজের সময়, হিজরি তারিখ এবং ইসলামিক বিষয়ে সাহায্য করতে পারি। ইসলামিক কোনো প্রশ্ন করুন!`,
+  ar: `أنا **Noor AI**، مساعد إسلامي. لا أستطيع إلا المساعدة في الأسئلة المتعلقة بالإسلام — القرآن، الحديث، أوقات الصلاة، التاريخ الهجري، والتوجيه الإسلامي. لا تتردد في طرح سؤال إسلامي!`,
+  tr: `Ben **Noor AI**, bir İslami asistanım. Yalnızca İslam'a ilişkin sorularda yardımcı olabiliyorum — Kuran, hadis, namaz vakitleri, hicri tarih ve İslami rehberlik. Lütfen bir İslami soru sorun!`,
+  id: `Saya **Noor AI**, asisten Islam. Saya hanya bisa membantu pertanyaan seputar Islam — Al-Quran, Hadis, jadwal sholat, tanggal Hijriyah, dan panduan Islam. Silakan ajukan pertanyaan Islam!`,
+  es: `Soy **Noor AI**, un asistente islámico. Solo puedo ayudar con preguntas relacionadas con el Islam — el Corán, el hadís, los horarios de oración, las fechas hijri y la orientación islámica. ¡Siéntete libre de hacer una pregunta islámica!`,
+  fr: `Je suis **Noor AI**, un assistant islamique. Je ne peux aider qu'avec des questions liées à l'Islam — le Coran, les hadiths, les horaires de prière, les dates hijri et les conseils islamiques. N'hésitez pas à poser une question islamique !`,
+  ru: `Я **Noor AI**, исламский помощник. Я могу помочь только с вопросами, связанными с исламом — Кораном, хадисами, временем намаза, датами хиджры и исламским руководством. Пожалуйста, задайте исламский вопрос!`,
+  zh: `我是 **Noor AI**，一个伊斯兰助手。我只能帮助回答与伊斯兰相关的问题 — 古兰经、圣训、礼拜时间、伊斯兰历日期和伊斯兰指导。请随时提问伊斯兰问题！`,
+};
+
 export interface ChatResponse {
   reply: string;
   source: 'cache' | 'model';
@@ -147,95 +206,6 @@ export class ChatService {
     return query.trim().replace(/[?؟!।.]+$/u, '').trim();
   }
 
-  /**
-   * Returns true if the message is asking about prayer/salah times.
-   * These are real-time queries and must never be served from cache.
-   */
-  private isPrayerTimeQuery(message: string): boolean {
-    const lower = message.toLowerCase();
-
-    // English
-    if (/prayer\s*time|salah\s*time|namaz\s*time|salat\s*time/.test(lower)) return true;
-
-    // Banglish (romanised Bengali)
-    if (/namajer\s*(somoy|time|waqt|oqt)|namaz\s*(somoy|time|waqt)|azan\s*(somoy|time)/.test(lower)) return true;
-
-    // Bengali Unicode — general prayer-time phrases
-    // covers: নামাজের সময়, নামাযের সময়, সালাতের সময়, আজকের নামাজ, নামাজের ওয়াক্ত, আজানের সময়
-    if (/নামাজের\s*সময়|নামাযের\s*সময়|সালাতের\s*সময়/.test(message)) return true;
-    if (/নামাজের\s*ওয়াক্ত|নামাযের\s*ওয়াক্ত|আজানের\s*সময়/.test(message)) return true;
-    if (/আজকের\s*নামাজ|আজকের\s*সালাত/.test(message)) return true;
-
-    // Bengali Unicode — specific salah names in genitive/possessive form + time word
-    // e.g. "ফজরের সময় কত", "এশার নামাজ কখন"
-    if (/(ফজরের|যোহরের|জোহরের|আসরের|মাগরিবের|মাগরেবের|এশার|ইশার)\s*(সময়|নামাজ|নামায|ওয়াক্ত)/.test(message)) return true;
-
-    // Arabic
-    if (/وقت\s*(الصلاة|صلاة)|مواقيت\s*الصلاة|أوقات\s*الصلاة/.test(message)) return true;
-
-    // Turkish
-    if (/namaz\s*vakti|ezan\s*vakti/.test(lower)) return true;
-
-    // Indonesian / Malay
-    if (/waktu\s*sholat|waktu\s*salat|jadwal\s*sholat|jadwal\s*salat/.test(lower)) return true;
-
-    // Generic: salah-name keywords combined with time words (any language)
-    const prayerNames = /fajr|subuh|dhuhr|zuhr|zuhur|asr|ashar|maghrib|magrib|isha|isya|এশা|ফজর|যোহর|জোহর|আসর|মাগরিব/;
-    const timeWords = /time|somoy|waqt|vakti|waktu|وقت|সময়|ওয়াক্ত/;
-    if (prayerNames.test(lower) && timeWords.test(lower)) return true;
-
-    return false;
-  }
-
-  /**
-   * Returns true if the message asks for current or future Islamic calendar data.
-   * Hijri calendar answers are date-sensitive and must not come from cache.
-   */
-  private isHijriCalendarQuery(message: string): boolean {
-    const lower = message.toLowerCase();
-
-    // English and common romanised terms
-    if (/hijri|islamic\s*calendar|islamic\s*date|arabic\s*date|lunar\s*date/.test(lower)) return true;
-    if (/\beid\b|eid\s*al[-\s]*(fitr|adha)|ramadan\s*(date|calendar|start|begin|when)/.test(lower)) return true;
-    if (/shawwal|dhul\s*hijjah|zul\s*hijjah|dhu\s*al[-\s]*hijjah/.test(lower)) return true;
-    if (/gregorian\s*to\s*hijri|hijri\s*to\s*gregorian/.test(lower)) return true;
-
-    // Bengali Unicode
-    if (/হিজরি|হিজরী|ইসলামিক\s*ক্যালেন্ডার|ইসলামি\s*তারিখ|আরবি\s*তারিখ/.test(message)) return true;
-    if (/ঈদ|ইদ|রমজান|রামাদান|শাওয়াল|শাওয়াল|জিলহজ|যিলহজ|জুলহজ/.test(message)) return true;
-
-    // Arabic
-    if (/هجري|التقويم\s*الإسلامي|التاريخ\s*الإسلامي|عيد\s*الفطر|عيد\s*الأضحى|رمضان|شوال|ذو\s*الحجة/.test(message)) return true;
-
-    // Turkish / Indonesian / Malay
-    if (/hicri|islam\s*takvimi|ramazan|lebaran|idul\s*(fitri|adha)|kalender\s*hijriah|tanggal\s*hijriah/.test(lower)) return true;
-
-    return false;
-  }
-
-  /**
-   * Quran recitation responses can contain media, so they must never be served
-   * from the text-only semantic answer cache.
-   */
-  private isQuranRecitationQuery(message: string): boolean {
-    const lower = message.toLowerCase();
-
-    if (/\b(recite|play|listen|hear|tilawah|tilaawah|qirat|qiraat|quran audio|surah audio)\b/.test(lower)) return true;
-    if (/(সূরা|সুরা|কুরআন|কোরআন).*(তেলাওয়াত|শুনাও|শুনতে|প্লে|চালাও)/.test(message)) return true;
-    if (/(তেলাওয়াত|শুনাও|শুনতে|প্লে|চালাও).*(সূরা|সুরা|কুরআন|কোরআন)/.test(message)) return true;
-    if (/(تلاوة|تشغيل|استمع|اسمع|سورة|قرآن)/.test(message) && /(تلاوة|تشغيل|استمع|اسمع)/.test(message)) return true;
-
-    return false;
-  }
-
-  private shouldSkipCache(message: string): boolean {
-    return (
-      this.isPrayerTimeQuery(message) ||
-      this.isHijriCalendarQuery(message) ||
-      this.isQuranRecitationQuery(message)
-    );
-  }
-
   private async getDirectQuranRecitation(message: string): Promise<ChatResponse> {
     const result = await this.mcpService.executeTool('get_quran_recitation', {
       surahName: message,
@@ -255,12 +225,28 @@ export class ChatService {
   }
 
   async chat(userId: string, message: string, location?: GeoLocation | null): Promise<ChatResponse> {
-    // 1. Generate embedding for incoming message (normalized for consistent cache keys)
+    // 1. Classify intent with AI (works for any language; falls back to general on error)
+    const { intent, language }: IntentResult = await this.geminiService.classifyIntent(message);
     const normalizedMessage = this.normalizeQuery(message);
-    const skipCache = this.shouldSkipCache(message);
+
+    // 2. Short-circuit: greeting — return branded Noor AI intro in the user's language
+    if (intent === 'greeting') {
+      const reply = GREETING_RESPONSES[language] ?? GREETING_RESPONSES['en'];
+      return { reply, source: 'model', similarity: null };
+    }
+
+    // 3. Short-circuit: off-topic — return localised refusal without hitting the agentic loop
+    if (intent === 'off_topic') {
+      const reply = OFF_TOPIC_RESPONSES[language] ?? OFF_TOPIC_RESPONSES['en'];
+      return { reply, source: 'model', similarity: null };
+    }
+
+    // 4. Determine whether to skip the RAG cache (real-time or media intents)
+    const skipCache = intent !== 'general';
     const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
 
-    if (this.isQuranRecitationQuery(message)) {
+    // 5. Short-circuit: Quran recitation — fetch audio directly without the full agentic loop
+    if (intent === 'quran_recitation') {
       return this.getDirectQuranRecitation(message);
     }
 
@@ -287,7 +273,7 @@ export class ChatService {
       userHistory.splice(0, userHistory.length - 10);
     }
 
-    // 4. Run agentic loop
+    // 6. Run agentic loop
     const agentResult = await this.geminiService.runAgenticLoop(
       buildSystemPrompt(location),
       [...userHistory],
@@ -296,18 +282,10 @@ export class ChatService {
     const media = agentResult.media?.find(isQuranRecitationMedia);
     const reply = agentResult.text.trim() || (media ? getMediaFallbackReply(media) : agentResult.text);
 
-    // 5. Check for refusal
-    const isRefusal = reply.startsWith("I'm only able to answer Islamic questions");
-    if (isRefusal) {
-      // Remove user message from history — do not persist refusals
-      userHistory.pop();
-      return { reply, source: 'model', similarity: null, media };
-    }
-
-    // 6. Add assistant reply to history
+    // 7. Add assistant reply to history
     userHistory.push({ role: 'model', parts: [{ text: reply }] });
 
-    // 7. Save to cache (skip for real-time queries like prayer times)
+    // 8. Save to cache (skip for real-time queries)
     if (!skipCache) {
       this.ragService
         .saveToCache(normalizedMessage, reply, embedding)
@@ -318,11 +296,32 @@ export class ChatService {
   }
 
   async *chatStream(userId: string, message: string, location?: GeoLocation | null): AsyncGenerator<StreamChunk> {
+    // 1. Classify intent with AI (works for any language; falls back to general on error)
+    const { intent, language }: IntentResult = await this.geminiService.classifyIntent(message);
     const normalizedMessage = this.normalizeQuery(message);
-    const skipCache = this.shouldSkipCache(message);
+
+    // 2. Short-circuit: greeting
+    if (intent === 'greeting') {
+      const reply = GREETING_RESPONSES[language] ?? GREETING_RESPONSES['en'];
+      yield { type: 'chunk', text: reply };
+      yield { type: 'done', source: 'model', similarity: null };
+      return;
+    }
+
+    // 3. Short-circuit: off-topic
+    if (intent === 'off_topic') {
+      const reply = OFF_TOPIC_RESPONSES[language] ?? OFF_TOPIC_RESPONSES['en'];
+      yield { type: 'chunk', text: reply };
+      yield { type: 'done', source: 'model', similarity: null };
+      return;
+    }
+
+    // 4. Determine whether to skip the RAG cache
+    const skipCache = intent !== 'general';
     const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
 
-    if (this.isQuranRecitationQuery(message)) {
+    // 5. Short-circuit: Quran recitation
+    if (intent === 'quran_recitation') {
       const result = await this.getDirectQuranRecitation(message);
       if (result.media) yield { type: 'media', media: result.media };
       yield { type: 'chunk', text: result.reply };
@@ -379,13 +378,6 @@ export class ChatService {
     if (!fullReply.trim() && media) {
       fullReply = getMediaFallbackReply(media);
       yield { type: 'chunk', text: fullReply };
-    }
-
-    const isRefusal = fullReply.startsWith("I'm only able to answer Islamic questions");
-    if (isRefusal) {
-      userHistory.pop();
-      yield { type: 'done', source: 'model', similarity: null, media };
-      return;
     }
 
     userHistory.push({ role: 'model', parts: [{ text: fullReply }] });

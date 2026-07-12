@@ -64,6 +64,7 @@ export class ChatController {
     message: string;
     response: string | null;
     source: string;
+    failureReason?: string | null;
   }): Promise<void> {
     try {
       await this.messageLogService.log(data);
@@ -116,25 +117,47 @@ export class ChatController {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
+
     const chunks: string[] = [];
     let source = 'model';
-    let responseText: string | null = null;
+    let mediaEmitted = false;
+    let failureReason: string | null = null;
+
+    const FRIENDLY_ERROR_MSG = 'Noor AI encountered an issue. Please try again or rephrase your question.';
+
     try {
       for await (const event of this.chatService.chatStream(dto.userId, dto.message, location)) {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
         if (event.type === 'chunk') chunks.push(event.text);
-        if (event.type === 'done') source = event.source;
+        if (event.type === 'done')  source = event.source;
+        if (event.type === 'media') mediaEmitted = true;
+      }
+
+      // ── Silent empty response detection ──────────────────────────────────
+      // Stream completed without error but produced no text and no media.
+      const fullReply = chunks.join('');
+      if (!fullReply && !mediaEmitted) {
+        failureReason = 'empty_response: stream completed with no text or media output';
+        res.write(
+          `data: ${JSON.stringify({ type: 'error', message: FRIENDLY_ERROR_MSG })}\n\n`,
+        );
       }
     } catch (err) {
-      responseText = chunks.join('') || null;
-      res.write(`data: ${JSON.stringify({ type: 'error', message: (err as Error).message })}\n\n`);
+      // ── Exception during streaming ────────────────────────────────────────
+      // Store the raw error message for admin visibility.
+      failureReason = (err as Error).message;
+      res.write(
+        `data: ${JSON.stringify({ type: 'error', message: FRIENDLY_ERROR_MSG })}\n\n`,
+      );
     } finally {
       await this.persistMessageLog({
         userId: dto.userId,
         ipAddress: ip,
         message: dto.message,
-        response: responseText ?? (chunks.join('') || null),
+        // Preserve any partial text accumulated before an error
+        response: chunks.join('') || null,
         source,
+        failureReason,
       });
 
       if (!res.writableEnded) {

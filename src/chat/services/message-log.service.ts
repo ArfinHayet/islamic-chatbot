@@ -31,6 +31,7 @@ export class MessageLogService {
     message: string;
     response: string | null;
     source: string;
+    failureReason?: string | null;
   }): Promise<void> {
     const maxAttempts = 3;
 
