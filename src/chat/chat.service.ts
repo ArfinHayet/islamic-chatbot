@@ -217,11 +217,48 @@ export class ChatService {
       return { reply, source: 'model', similarity: null, media };
     }
 
-    const error = result && typeof result === 'object' && 'error' in result
-      ? String((result as { error: unknown }).error)
-      : 'Failed to get Quran recitation.';
-
     return { reply: error, source: 'model', similarity: null };
+  }
+
+  private buildPromptForIntent(
+    intent: MessageIntent,
+    language: string,
+    location?: GeoLocation | null,
+  ): string {
+    const base = buildSystemPrompt(location);
+
+    if (intent === 'greeting') {
+      const template = GREETING_RESPONSES[language] ?? GREETING_RESPONSES['en'];
+      return [
+        base,
+        '',
+        '--- INTENT CONTEXT: GREETING ---',
+        'The user message has been classified as a greeting or simple identity query.',
+        "Greet the user warmly and introduce yourself, adapting naturally to the user's language, tone, style, or poetic requests.",
+        'You MUST incorporate the core facts from this reference template naturally into your response — do not just copy-paste it literally:',
+        template,
+        'Do NOT call any search tools.',
+        '--------------------------------',
+      ].join('\n');
+    }
+
+    if (intent === 'off_topic') {
+      const template = OFF_TOPIC_RESPONSES[language] ?? OFF_TOPIC_RESPONSES['en'];
+      return [
+        base,
+        '',
+        '--- INTENT CONTEXT: OFF_TOPIC ---',
+        'The user message has been classified as off-topic (unrelated to Islam or Noor AI).',
+        'You MUST politely refuse to answer any non-Islamic topics and redirect the user back to Islamic questions.',
+        "Adapt naturally to the user's language, tone, and style requests, keeping your response polite and professional.",
+        'Use this reference template as your guidelines:',
+        template,
+        'Do NOT answer the off-topic question. Do NOT call any search tools.',
+        '---------------------------------',
+      ].join('\n');
+    }
+
+    return base;
   }
 
   async chat(userId: string, message: string, location?: GeoLocation | null): Promise<ChatResponse> {
@@ -229,28 +266,16 @@ export class ChatService {
     const { intent, language }: IntentResult = await this.geminiService.classifyIntent(message);
     const normalizedMessage = this.normalizeQuery(message);
 
-    // 2. Short-circuit: greeting — return branded Noor AI intro in the user's language
-    if (intent === 'greeting') {
-      const reply = GREETING_RESPONSES[language] ?? GREETING_RESPONSES['en'];
-      return { reply, source: 'model', similarity: null };
-    }
-
-    // 3. Short-circuit: off-topic — return localised refusal without hitting the agentic loop
-    if (intent === 'off_topic') {
-      const reply = OFF_TOPIC_RESPONSES[language] ?? OFF_TOPIC_RESPONSES['en'];
-      return { reply, source: 'model', similarity: null };
-    }
-
-    // 4. Determine whether to skip the RAG cache (real-time or media intents)
-    const skipCache = intent !== 'general';
-    const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
-
-    // 5. Short-circuit: Quran recitation — fetch audio directly without the full agentic loop
+    // 2. Short-circuit: Quran recitation — fetch audio directly without the full agentic loop
     if (intent === 'quran_recitation') {
       return this.getDirectQuranRecitation(message);
     }
 
-    // 2. Search RAG cache (skip for real-time queries like prayer times)
+    // 3. Determine whether to skip the RAG cache (real-time or media intents)
+    const skipCache = intent === 'prayer_time' || intent === 'hijri_calendar' || intent === 'quran_recitation';
+    const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
+
+    // 4. Search RAG cache
     if (!skipCache) {
       try {
         const cached = await this.ragService.searchSimilar(embedding);
@@ -263,7 +288,7 @@ export class ChatService {
       }
     }
 
-    // 3. Build history for this user (keep last 10 messages)
+    // 5. Build history for this user (keep last 10 messages)
     if (!this.history.has(userId)) {
       this.history.set(userId, []);
     }
@@ -273,19 +298,23 @@ export class ChatService {
       userHistory.splice(0, userHistory.length - 10);
     }
 
-    // 6. Run agentic loop
+    // 6. Select tools & build custom system prompt
+    const useTools = (intent === 'greeting' || intent === 'off_topic') ? [] : ISLAMIC_TOOLS;
+    const systemPrompt = this.buildPromptForIntent(intent, language, location);
+
+    // 7. Run agentic loop
     const agentResult = await this.geminiService.runAgenticLoop(
-      buildSystemPrompt(location),
+      systemPrompt,
       [...userHistory],
-      ISLAMIC_TOOLS,
+      useTools,
     );
     const media = agentResult.media?.find(isQuranRecitationMedia);
     const reply = agentResult.text.trim() || (media ? getMediaFallbackReply(media) : agentResult.text);
 
-    // 7. Add assistant reply to history
+    // 8. Add assistant reply to history
     userHistory.push({ role: 'model', parts: [{ text: reply }] });
 
-    // 8. Save to cache (skip for real-time queries)
+    // 9. Save to cache
     if (!skipCache) {
       this.ragService
         .saveToCache(normalizedMessage, reply, embedding)
@@ -300,27 +329,7 @@ export class ChatService {
     const { intent, language }: IntentResult = await this.geminiService.classifyIntent(message);
     const normalizedMessage = this.normalizeQuery(message);
 
-    // 2. Short-circuit: greeting
-    if (intent === 'greeting') {
-      const reply = GREETING_RESPONSES[language] ?? GREETING_RESPONSES['en'];
-      yield { type: 'chunk', text: reply };
-      yield { type: 'done', source: 'model', similarity: null };
-      return;
-    }
-
-    // 3. Short-circuit: off-topic
-    if (intent === 'off_topic') {
-      const reply = OFF_TOPIC_RESPONSES[language] ?? OFF_TOPIC_RESPONSES['en'];
-      yield { type: 'chunk', text: reply };
-      yield { type: 'done', source: 'model', similarity: null };
-      return;
-    }
-
-    // 4. Determine whether to skip the RAG cache
-    const skipCache = intent !== 'general';
-    const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
-
-    // 5. Short-circuit: Quran recitation
+    // 2. Short-circuit: Quran recitation
     if (intent === 'quran_recitation') {
       const result = await this.getDirectQuranRecitation(message);
       if (result.media) yield { type: 'media', media: result.media };
@@ -329,7 +338,11 @@ export class ChatService {
       return;
     }
 
-    // Cache hit — yield full answer as one chunk (skip for real-time queries)
+    // 3. Determine whether to skip the RAG cache
+    const skipCache = intent === 'prayer_time' || intent === 'hijri_calendar' || intent === 'quran_recitation';
+    const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
+
+    // Cache hit — yield full answer as one chunk
     if (!skipCache) {
       try {
         const cached = await this.ragService.searchSimilar(embedding);
@@ -350,14 +363,18 @@ export class ChatService {
     userHistory.push({ role: 'user', parts: [{ text: message }] });
     if (userHistory.length > 10) userHistory.splice(0, userHistory.length - 10);
 
+    // Select tools & build custom system prompt
+    const useTools = (intent === 'greeting' || intent === 'off_topic') ? [] : ISLAMIC_TOOLS;
+    const systemPrompt = this.buildPromptForIntent(intent, language, location);
+
     // Stream from Gemini, accumulate full reply for cache + history
     let fullReply = '';
     let media: QuranRecitationMedia | undefined;
     try {
       for await (const event of this.geminiService.runAgenticLoopStream(
-        buildSystemPrompt(location),
+        systemPrompt,
         [...userHistory],
-        ISLAMIC_TOOLS,
+        useTools,
       )) {
         if (event.type === 'media' && isQuranRecitationMedia(event.media)) {
           media = event.media;
