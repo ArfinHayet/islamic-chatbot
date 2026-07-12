@@ -106,6 +106,20 @@ interface QuranRecitationResult {
   media?: QuranRecitationMedia;
 }
 
+interface QuranTafsirMedia {
+  type: 'quran_tafsir';
+  surahNumber: number;
+  surahName: string;
+  startAyah?: number | null;
+  endAyah?: number | null;
+  isLarge: boolean;
+}
+
+interface QuranTafsirResult {
+  reply: string;
+  media?: QuranTafsirMedia;
+}
+
 interface QuranSurahRerankResult {
   surahNumber: number | null;
   confidence: 'high' | 'medium' | 'low';
@@ -123,6 +137,7 @@ type ToolResult =
   | Record<string, string>
   | HijriCalendarResult
   | QuranRecitationResult
+  | QuranTafsirResult
   | NotFoundResult
   | ErrorResult;
 
@@ -300,6 +315,8 @@ export class McpService {
         return this.getHijriCalendar(toolInput);
       case 'get_quran_recitation':
         return this.getQuranRecitation(toolInput);
+      case 'get_tafsir':
+        return this.getTafsir(toolInput);
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
@@ -805,5 +822,221 @@ export class McpService {
       this.logger.warn(`Hijri calendar lookup failed: ${(error as Error).message}`);
       return { error: `Failed to get Hijri calendar: ${(error as Error).message}` };
     }
+  }
+
+  private async getTafsir(input: Record<string, string>): Promise<QuranTafsirResult | ErrorResult> {
+    try {
+      const language = input.language?.trim() || 'en';
+
+      let surahNumber: number | null = null;
+      let startAyah: number | null = null;
+      let endAyah: number | null = null;
+
+      // 1. If startAyah and endAyah are passed directly
+      if (input.startAyah) {
+        startAyah = Number(input.startAyah);
+      }
+      if (input.endAyah) {
+        endAyah = Number(input.endAyah);
+      }
+
+      // 2. Resolve surahNumber
+      const rawNumber = input.surahNumber?.trim();
+      const numberValue = Number(rawNumber);
+      if (rawNumber && Number.isInteger(numberValue) && numberValue >= 1 && numberValue <= 114) {
+        surahNumber = numberValue;
+      }
+
+      const rawName = input.surahName?.trim();
+
+      // If we don't have surahNumber but we have rawName, try to find/parse it
+      if (!surahNumber && rawName) {
+        const nameMatch = await this.ragService.findQuranSurahByName(rawName);
+        if (nameMatch) {
+          surahNumber = nameMatch.surah_number;
+        } else {
+          const parsed = await this.parseQuranRecitationQuery(rawName);
+          if (parsed.surahNumber) {
+            surahNumber = parsed.surahNumber;
+            if (parsed.startAyah && !startAyah) {
+              startAyah = parsed.startAyah;
+            }
+            if (parsed.endAyah && !endAyah) {
+              endAyah = parsed.endAyah;
+            }
+          }
+        }
+      }
+
+      // If we STILL don't have surahNumber but we have rawName, try embedding search + rerank as fallback
+      if (!surahNumber && rawName) {
+        const embedding = await this.embedWithRotation(rawName);
+        const candidates = await this.ragService.searchQuranSurahCandidates(embedding, 8);
+        const reranked = await this.rerankQuranSurahCandidates(rawName, candidates);
+        if (reranked) {
+          surahNumber = reranked.surah_number;
+        }
+      }
+
+      if (!surahNumber) {
+        return {
+          reply: language === 'bn'
+            ? 'আপনি কোন সূরার তাফসীর জানতে চাচ্ছেন? যেমন: সূরা ফাতিহা, সূরা ইয়াসিন, সূরা আল-বাকারাহ ইত্যাদি।'
+            : 'Which surah would you like to view the Tafsir for? For example: Al-Fatihah, Ya-Sin, Al-Baqarah, or Al-Mulk.',
+        };
+      }
+
+      // Retrieve the surah from DB to get names
+      const surah = await this.ragService.getQuranSurahByNumber(surahNumber);
+      if (!surah) {
+        return {
+          reply: language === 'bn'
+            ? 'দুঃখিত, সূরাটি খুঁজে পাওয়া যায়নি।'
+            : 'Sorry, I could not find that surah.',
+        };
+      }
+
+      // Validate/normalize bounds
+      const maxVerses = SURAH_VERSE_COUNTS[surah.surah_number - 1];
+      if (startAyah && (startAyah < 1 || startAyah > maxVerses)) {
+        startAyah = 1;
+      }
+      if (endAyah && (endAyah < 1 || endAyah > maxVerses)) {
+        endAyah = maxVerses;
+      }
+      if (!startAyah) startAyah = 1;
+      if (!endAyah) endAyah = maxVerses;
+
+      if (startAyah > endAyah) {
+        const temp = startAyah;
+        startAyah = endAyah;
+        endAyah = temp;
+      }
+
+      const count = endAyah - startAyah + 1;
+
+      // Fetch Tafsir records
+      const tafsirs = await this.ragService.getQuranTafsir(surahNumber, startAyah, endAyah);
+      if (tafsirs.length === 0) {
+        return {
+          reply: language === 'bn'
+            ? `সূরা ${surah.name_bn}-এর আয়াত ${startAyah} থেকে ${endAyah}-এর জন্য কোনো তাফসীর পাওয়া যায়নি।`
+            : `No Tafsir found for Surah ${surah.name_en} (Ayahs ${startAyah}-${endAyah}) in the database.`,
+        };
+      }
+
+      const isLarge = count >= 10;
+      const nameLocalized = language === 'bn' ? surah.name_bn : surah.name_en;
+
+      if (!isLarge) {
+        // Return full Tafsir content directly (formatted simply as text)
+        let fullContent = '';
+        for (const t of tafsirs) {
+          const plainText = t.text_plain || t.text_html.replace(/<[^>]+>/g, '').trim() || '';
+          fullContent += `Ayah ${t.verse_number}:\n${plainText}\n\n`;
+        }
+
+        const intro = language === 'bn'
+          ? `সূরা ${nameLocalized} (আয়াত ${startAyah}-${endAyah})-এর তাফসীর:\n\n`
+          : `Tafsir of Surah ${nameLocalized} (Ayahs ${startAyah}-${endAyah}):\n\n`;
+
+        return {
+          reply: `${intro}${fullContent.trim()}`,
+          media: {
+            type: 'quran_tafsir',
+            surahNumber: surah.surah_number,
+            surahName: surah.name_en,
+            startAyah,
+            endAyah,
+            isLarge: false,
+          },
+        };
+      } else {
+        // large surah or range: select 20 rows and summarize using AI in target language
+        const L = tafsirs.length;
+        const selectedTafsirs: typeof tafsirs = [];
+        if (L <= 20) {
+          selectedTafsirs.push(...tafsirs);
+        } else {
+          const step = (L - 1) / 19;
+          for (let i = 0; i < 20; i++) {
+            const idx = Math.round(i * step);
+            if (tafsirs[idx]) {
+              selectedTafsirs.push(tafsirs[idx]);
+            }
+          }
+        }
+
+        // Build summary input text
+        const selectedTexts = selectedTafsirs
+          .map((t) => `Ayah ${t.verse_number}: ${t.text_plain || t.text_html.replace(/<[^>]+>/g, '').trim()}`)
+          .join('\n\n');
+
+        // Summarize via Gemini
+        const summary = await this.summarizeTafsir(
+          surah.name_en,
+          startAyah,
+          endAyah,
+          selectedTexts,
+          language,
+        );
+
+        return {
+          reply: summary,
+          media: {
+            type: 'quran_tafsir',
+            surahNumber: surah.surah_number,
+            surahName: surah.name_en,
+            startAyah,
+            endAyah,
+            isLarge: true,
+          },
+        };
+      }
+    } catch (error) {
+      this.logger.warn(`Tafsir lookup failed: ${(error as Error).message}`);
+      return {
+        error: `Failed to get Tafsir: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  private async summarizeTafsir(
+    surahName: string,
+    startAyah: number,
+    endAyah: number,
+    text: string,
+    language: string,
+  ): Promise<string> {
+    const prompt =
+      `You are an expert Islamic scholar.\n` +
+      `Below is a representative subset of Tafsir (commentary) text for Surah ${surahName} (Ayahs ${startAyah} to ${endAyah}).\n` +
+      `Your task is to summarize the core themes, messages, lessons, and explanation of these verses in a clear, structured, and informative manner.\n` +
+      `Generate the ENTIRE summary in the requested language: ${language}.\n\n` +
+      `Representative Tafsir text:\n${text}`;
+
+    const modelName = this.configService.get<string>('gemini.chatModel') ?? 'gemini-2.5-flash';
+    const maxAttempts = (await this.geminiKeyService.getStats()).total || 1;
+    let lastError: Error = new Error('No keys tried');
+
+    for (let attempt = 0; attempt < maxAttempts + 1; attempt++) {
+      const { id, apiKey } = await this.getGeminiApiKey();
+
+      try {
+        const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: modelName });
+        const response = await model.generateContent(prompt);
+        return response.response.text();
+      } catch (error) {
+        lastError = error as Error;
+        if (this.isRateLimitError(error) && id) {
+          this.logger.warn(`MCP Tafsir summarizer key ${id.slice(0, 8)}… rate-limited, rotating...`);
+          await this.geminiKeyService.markRateLimited(id);
+        } else {
+          break;
+        }
+      }
+    }
+
+    throw lastError;
   }
 }

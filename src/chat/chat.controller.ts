@@ -131,12 +131,15 @@ export class ChatController {
         if (event.type === 'chunk') chunks.push(event.text);
         if (event.type === 'done')  source = event.source;
         if (event.type === 'media') mediaEmitted = true;
+        if (event.type === 'error') {
+          failureReason = event.message || 'Stream error';
+        }
       }
 
       // ── Silent empty response detection ──────────────────────────────────
       // Stream completed without error but produced no text and no media.
       const fullReply = chunks.join('');
-      if (!fullReply && !mediaEmitted) {
+      if (!fullReply && !mediaEmitted && !failureReason) {
         failureReason = 'empty_response: stream completed with no text or media output';
         res.write(
           `data: ${JSON.stringify({ type: 'error', message: FRIENDLY_ERROR_MSG })}\n\n`,
@@ -249,5 +252,22 @@ export class ChatController {
     this.prayerTimesCache.set(cacheKey, prayerTimesResponse);
 
     return prayerTimesResponse;
+  }
+
+  @Get('tafsir')
+  async getTafsir(
+    @Query('surahNumber') surahNumber: string,
+    @Query('startAyah') startAyah?: string,
+    @Query('endAyah') endAyah?: string,
+  ): Promise<Array<{ verse_number: number; verse_key: string; text_html: string }>> {
+    const sNum = Number(surahNumber);
+    if (isNaN(sNum) || sNum < 1 || sNum > 114) {
+      throw new BadRequestException('Invalid surahNumber. Must be between 1 and 114.');
+    }
+
+    const start = startAyah ? Number(startAyah) : 1;
+    const end = endAyah ? Number(endAyah) : 300;
+
+    return this.chatService.getRawTafsir(sNum, start, end);
   }
 }

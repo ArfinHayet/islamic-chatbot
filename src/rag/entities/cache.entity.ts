@@ -15,6 +15,9 @@ export class CacheEntity {
   @Column({ type: 'text' })
   embedding: string;
 
+  @Column({ type: 'jsonb', nullable: true })
+  media!: any | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

@@ -149,11 +149,22 @@ const OFF_TOPIC_RESPONSES: Record<string, string> = {
   zh: `我是 **Noor AI**，一个伊斯兰助手。我只能帮助回答与伊斯兰相关的问题 — 古兰经、圣训、礼拜时间、伊斯兰历日期和伊斯兰指导。请随时提问伊斯兰问题！`,
 };
 
+export interface QuranTafsirMedia {
+  type: 'quran_tafsir';
+  surahNumber: number;
+  surahName: string;
+  startAyah?: number | null;
+  endAyah?: number | null;
+  isLarge: boolean;
+}
+
+export type ChatMedia = QuranRecitationMedia | QuranTafsirMedia;
+
 export interface ChatResponse {
   reply: string;
   source: 'cache' | 'model';
   similarity: number | null;
-  media?: QuranRecitationMedia;
+  media?: ChatMedia;
 }
 
 export interface QuranRecitationMedia {
@@ -170,8 +181,9 @@ export interface QuranRecitationMedia {
 
 export type StreamChunk =
   | { type: 'chunk'; text: string }
-  | { type: 'media'; media: QuranRecitationMedia }
-  | { type: 'done'; source: 'cache' | 'model'; similarity: number | null; media?: QuranRecitationMedia };
+  | { type: 'media'; media: ChatMedia }
+  | { type: 'error'; message: string }
+  | { type: 'done'; source: 'cache' | 'model'; similarity: number | null; media?: ChatMedia };
 
 function isQuranRecitationMedia(value: unknown): value is QuranRecitationMedia {
   return (
@@ -182,8 +194,24 @@ function isQuranRecitationMedia(value: unknown): value is QuranRecitationMedia {
   );
 }
 
-function getMediaFallbackReply(media: QuranRecitationMedia): string {
-  return `Here is Surah ${media.surahName} recited by ${media.reciterName}.`;
+function isQuranTafsirMedia(value: unknown): value is QuranTafsirMedia {
+  return (
+    Boolean(value) &&
+    typeof value === 'object' &&
+    (value as QuranTafsirMedia).type === 'quran_tafsir' &&
+    typeof (value as QuranTafsirMedia).surahNumber === 'number'
+  );
+}
+
+function isChatMedia(value: unknown): value is ChatMedia {
+  return isQuranRecitationMedia(value) || isQuranTafsirMedia(value);
+}
+
+function getMediaFallbackReply(media: ChatMedia): string {
+  if (media.type === 'quran_recitation') {
+    return `Here is Surah ${media.surahName} recited by ${media.reciterName}.`;
+  }
+  return `Here is the Tafsir for Surah ${media.surahName}.`;
 }
 
 function isQuranRecitationToolResult(value: unknown): value is { reply: string; media?: QuranRecitationMedia } {
@@ -203,7 +231,7 @@ export class ChatService {
     private readonly geminiService: GeminiService,
     private readonly ragService: RagService,
     private readonly mcpService: McpService,
-  ) {}
+  ) { }
 
   private normalizeQuery(query: string): string {
     // Trim whitespace and strip trailing punctuation that doesn't affect meaning:
@@ -305,7 +333,7 @@ export class ChatService {
         const cached = await this.ragService.searchSimilar(embedding);
         if (cached) {
           this.logger.log(`Cache hit for user ${userId}: similarity=${cached.similarity}`);
-          return { reply: cached.answer, source: 'cache', similarity: cached.similarity };
+          return { reply: cached.answer, source: 'cache', similarity: cached.similarity, media: cached.media };
         }
       } catch (err) {
         this.logger.warn(`Cache search failed, falling through to model: ${(err as Error).message}`);
@@ -332,7 +360,7 @@ export class ChatService {
       [...userHistory],
       useTools,
     );
-    const media = agentResult.media?.find(isQuranRecitationMedia);
+    const media = agentResult.media?.find(isChatMedia);
     const reply = agentResult.text.trim() || (media ? getMediaFallbackReply(media) : agentResult.text);
 
     // 8. Add assistant reply to history
@@ -341,7 +369,7 @@ export class ChatService {
     // 9. Save to cache
     if (!skipCache) {
       this.ragService
-        .saveToCache(normalizedMessage, reply, embedding)
+        .saveToCache(normalizedMessage, reply, embedding, media)
         .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
     }
 
@@ -352,6 +380,14 @@ export class ChatService {
     // 1. Classify intent with AI (works for any language; falls back to general on error)
     const { intent, language }: IntentResult = await this.geminiService.classifyIntent(message);
     const normalizedMessage = this.normalizeQuery(message);
+
+
+    // Build history
+    if (!this.history.has(userId)) this.history.set(userId, []);
+    const userHistory = this.history.get(userId) as GeminiMessage[];
+    userHistory.push({ role: 'user', parts: [{ text: message }] });
+    if (userHistory.length > 10) userHistory.splice(0, userHistory.length - 10);
+
 
     // 2. Short-circuit: Quran recitation
     if (intent === 'quran_recitation') {
@@ -373,8 +409,11 @@ export class ChatService {
         const cached = await this.ragService.searchSimilar(embedding);
         if (cached) {
           this.logger.log(`Cache hit for user ${userId}: similarity=${cached.similarity}`);
+          if (cached.media) {
+            yield { type: 'media', media: cached.media };
+          }
           yield { type: 'chunk', text: cached.answer };
-          yield { type: 'done', source: 'cache', similarity: cached.similarity };
+          yield { type: 'done', source: 'cache', similarity: cached.similarity, media: cached.media };
           return;
         }
       } catch (err) {
@@ -382,26 +421,20 @@ export class ChatService {
       }
     }
 
-    // Build history
-    if (!this.history.has(userId)) this.history.set(userId, []);
-    const userHistory = this.history.get(userId) as GeminiMessage[];
-    userHistory.push({ role: 'user', parts: [{ text: message }] });
-    if (userHistory.length > 10) userHistory.splice(0, userHistory.length - 10);
-
     // Select tools & build custom system prompt
     const useTools = (intent === 'greeting' || intent === 'off_topic') ? [] : ISLAMIC_TOOLS;
     const systemPrompt = this.buildPromptForIntent(intent, language, location);
 
     // Stream from Gemini, accumulate full reply for cache + history
     let fullReply = '';
-    let media: QuranRecitationMedia | undefined;
+    let media: ChatMedia | undefined;
     try {
       for await (const event of this.geminiService.runAgenticLoopStream(
         systemPrompt,
         [...userHistory],
         useTools,
       )) {
-        if (event.type === 'media' && isQuranRecitationMedia(event.media)) {
+        if (event.type === 'media' && isChatMedia(event.media)) {
           media = event.media;
           yield { type: 'media', media };
           continue;
@@ -414,7 +447,8 @@ export class ChatService {
       }
     } catch (err) {
       userHistory.pop();
-      throw err;
+      yield { type: 'error', message: (err as Error).message };
+      return;
     }
 
     if (!fullReply.trim() && media) {
@@ -424,12 +458,25 @@ export class ChatService {
 
     userHistory.push({ role: 'model', parts: [{ text: fullReply }] });
 
-    if (!skipCache && !media) {
+    if (!skipCache) {
       this.ragService
-        .saveToCache(normalizedMessage, fullReply, embedding)
+        .saveToCache(normalizedMessage, fullReply, embedding, media)
         .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
     }
 
     yield { type: 'done', source: 'model', similarity: null, media };
+  }
+
+  async getRawTafsir(
+    surahNumber: number,
+    startAyah: number,
+    endAyah: number,
+  ): Promise<Array<{ verse_number: number; verse_key: string; text_html: string }>> {
+    const records = await this.ragService.getQuranTafsir(surahNumber, startAyah, endAyah);
+    return records.map((r) => ({
+      verse_number: r.verse_number,
+      verse_key: r.verse_key,
+      text_html: r.text_html,
+    }));
   }
 }

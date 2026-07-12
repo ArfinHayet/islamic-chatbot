@@ -105,4 +105,33 @@ export const ISLAMIC_TOOLS = [
       },
     },
   },
+  {
+    name: 'get_tafsir',
+    description: 'Retrieve the Tafsir (exegesis/explanation) for a specific Surah, a single Ayah, or a range of Ayahs. Use this tool whenever the user asks for explanation, commentary, meaning, or Tafsir of Quran verses. Do NOT make up Tafsir from memory.',
+    parameters: {
+      type: 'object',
+      properties: {
+        surahNumber: {
+          type: 'string',
+          description: 'Optional Quran surah number from 1 to 114, e.g. 1 for Al-Fatihah or 36 for Ya-Sin.',
+        },
+        surahName: {
+          type: 'string',
+          description: 'Optional raw surah name or phrase from the user in any language. Do not normalize it.',
+        },
+        startAyah: {
+          type: 'string',
+          description: 'Optional start ayah number (1-based index).',
+        },
+        endAyah: {
+          type: 'string',
+          description: 'Optional end ayah number (1-based index).',
+        },
+        language: {
+          type: 'string',
+          description: 'Optional language code for the response. Detect from the user message. Supported: ar, bn, en, es, fr, id, ru, tr, zh. Default: en',
+        },
+      },
+    },
+  },
 ];

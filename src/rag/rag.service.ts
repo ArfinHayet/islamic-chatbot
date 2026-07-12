@@ -6,6 +6,7 @@ import { CacheEntity } from './entities/cache.entity';
 import { QuranVerseEntity } from './entities/quran-verse.entity';
 import { QuranSurahEntity } from './entities/quran-surah.entity';
 import { HadithEntity } from './entities/hadith.entity';
+import { QuranTafsirEntity } from './entities/tafsir.entity';
 
 export interface QuranVerseRaw {
   id: string;
@@ -49,6 +50,16 @@ interface CachedResult {
   answer: string;
   similarity: number;
   question: string;
+  media?: any;
+}
+
+export interface QuranTafsirRaw {
+  id: string; // "chapter:verse"
+  chapter_number: number;
+  verse_number: number;
+  verse_key: string;
+  text_html: string;
+  text_plain: string | null;
 }
 
 export interface HadithRaw {
@@ -115,6 +126,9 @@ export class RagService implements OnModuleInit {
         embedding vector(768) NOT NULL,
         "createdAt" TIMESTAMPTZ DEFAULT NOW()
       )
+    `);
+    await this.dataSource.query(`
+      ALTER TABLE islamic_cache ADD COLUMN IF NOT EXISTS media JSONB;
     `);
     // Migrate column to vector(768) if it exists with different dimensions
     await this.dataSource.query(`
@@ -206,11 +220,12 @@ export class RagService implements OnModuleInit {
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
     const result = await this.dataSource.query<
-      Array<{ question: string; answer: string; similarity: string }>
+      Array<{ question: string; answer: string; media: any; similarity: string }>
     >(
       `SELECT 
          question,
          answer,
+         media,
          1 - (embedding::vector <=> $1::vector) AS similarity
        FROM islamic_cache
        ORDER BY embedding::vector <=> $1::vector
@@ -224,16 +239,17 @@ export class RagService implements OnModuleInit {
         answer: result[0].answer,
         similarity: parseFloat(result[0].similarity),
         question: result[0].question,
+        media: typeof result[0].media === 'string' ? JSON.parse(result[0].media) : result[0].media,
       };
     }
     return null;
   }
 
-  async saveToCache(question: string, answer: string, embedding: number[]): Promise<void> {
+  async saveToCache(question: string, answer: string, embedding: number[], media?: any): Promise<void> {
     await this.dataSource.query(
-      `INSERT INTO islamic_cache (id, question, answer, embedding, "createdAt")
-       VALUES (gen_random_uuid(), $1, $2, $3::vector, NOW())`,
-      [question, answer, `[${embedding.join(',')}]`],
+      `INSERT INTO islamic_cache (id, question, answer, embedding, media, "createdAt")
+       VALUES (gen_random_uuid(), $1, $2, $3::vector, $4, NOW())`,
+      [question, answer, `[${embedding.join(',')}]`, media ? JSON.stringify(media) : null],
     );
   }
 
@@ -320,6 +336,47 @@ export class RagService implements OnModuleInit {
       `SELECT id FROM quran_verses WHERE embedding IS NOT NULL`,
     );
     return new Set(rows.map((r) => r.id));
+  }
+
+  async saveQuranTafsir(tafsir: QuranTafsirRaw, embedding: number[]): Promise<void> {
+    await this.dataSource.query(
+      `INSERT INTO quran_tafsirs (
+         id, chapter_number, verse_number, verse_key, text_html, text_plain, embedding, seeded_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7::vector,NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        tafsir.id,
+        tafsir.chapter_number,
+        tafsir.verse_number,
+        tafsir.verse_key,
+        tafsir.text_html,
+        tafsir.text_plain,
+        `[${embedding.join(',')}]`,
+      ],
+    );
+  }
+
+  async getSeededTafsirIds(): Promise<Set<string>> {
+    const rows = await this.dataSource.query<Array<{ id: string }>>(
+      `SELECT id FROM quran_tafsirs WHERE embedding IS NOT NULL`,
+    );
+    return new Set(rows.map((r) => r.id));
+  }
+
+  async getQuranTafsir(
+    surahNumber: number,
+    startAyah: number,
+    endAyah: number,
+  ): Promise<QuranTafsirEntity[]> {
+    return this.dataSource.query<QuranTafsirEntity[]>(
+      `SELECT id, chapter_number, verse_number, verse_key, text_html, text_plain, seeded_at
+       FROM quran_tafsirs
+       WHERE chapter_number = $1
+         AND verse_number >= $2
+         AND verse_number <= $3
+       ORDER BY verse_number ASC`,
+      [surahNumber, startAyah, endAyah],
+    );
   }
 
   async saveQuranSurah(surah: QuranSurahRaw, embedding: number[]): Promise<void> {

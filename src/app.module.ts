@@ -9,6 +9,7 @@ import { QuranVerseEntity } from './rag/entities/quran-verse.entity';
 import { QuranSurahEntity } from './rag/entities/quran-surah.entity';
 import { HadithEntity } from './rag/entities/hadith.entity';
 import { GeminiKeyEntity } from './rag/entities/gemini-key.entity';
+import { QuranTafsirEntity } from './rag/entities/tafsir.entity';
 import { MessageLogEntity } from './chat/entities/message-log.entity';
 import { AuthModule } from './auth/auth.module';
 import { ChatModule } from './chat/chat.module';
@@ -28,7 +29,7 @@ import { RagModule } from './rag/rag.module';
         ssl: { rejectUnauthorized: false },
         synchronize: false,
         logging: false,
-        entities: [CacheEntity, QuranVerseEntity, QuranSurahEntity, HadithEntity, GeminiKeyEntity, MessageLogEntity],
+        entities: [CacheEntity, QuranVerseEntity, QuranSurahEntity, HadithEntity, GeminiKeyEntity, MessageLogEntity, QuranTafsirEntity],
       }),
     }),
     ThrottlerModule.forRootAsync({
