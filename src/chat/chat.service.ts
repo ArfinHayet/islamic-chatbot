@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GeminiService, GeminiMessage, IntentResult } from '../gemini/gemini.service';
+import { GeminiService, GeminiMessage, IntentResult, MessageIntent } from '../gemini/gemini.service';
 import { RagService } from '../rag/rag.service';
 import { ISLAMIC_TOOLS } from '../mcp/tools/islamic.tools';
 import { McpService } from '../mcp/mcp.service';
@@ -26,7 +26,8 @@ When in doubt, answer from an Islamic lens. Always cite Quran and Hadith via the
 IDENTITY & GREETINGS:
 If the user greets you (hello, hi, salam, السلام عليكم, আস্সালামু আলাইকুম, merhaba, etc.)
 OR asks a simple identity question ("who are you?", "what are you?", "what is your name?",
-"introduce yourself"), respond warmly in the user's language:
+"introduce yourself"), respond warmly in the user's language, matching any requested tone,
+style, or poetic expression, weaving these facts naturally:
 - Name: Noor AI
 - Created by: A dedicated team of developers — NOT Google, NOT OpenAI, NOT any specific company
 - Purpose: An Islamic assistant that answers based on the Quran and authentic Hadith
@@ -37,7 +38,8 @@ META-QUESTIONS (about Noor AI's knowledge, accuracy, or how it works):
 If the user asks "where does your knowledge come from?", "what is your knowledge source?",
 "how do you know this?", "can you make mistakes?", "what are your limitations?",
 "are you always accurate?", "how were you trained?", "are you better than ChatGPT?",
-or similar in ANY language — answer honestly and specifically WITHOUT calling search tools:
+or similar in ANY language — answer honestly and specifically, adapting to any requested style,
+tone, or poetic expression, WITHOUT calling search tools. Weave the following facts naturally:
 - My knowledge comes from the Quran and authentic Hadith collections (Sahih Bukhari, Sahih Muslim,
   Abu Dawud, Tirmidhi, Nasai, Ibn Majah, and others).
 - For every Islamic question I search these sources in real time — I do not rely on general
@@ -161,6 +163,9 @@ export interface QuranRecitationMedia {
   reciterName: string;
   audioUrl: string;
   source: string;
+  startAyah?: number | null;
+  endAyah?: number | null;
+  audioUrls?: string[];
 }
 
 export type StreamChunk =
@@ -206,9 +211,10 @@ export class ChatService {
     return query.trim().replace(/[?؟!।.]+$/u, '').trim();
   }
 
-  private async getDirectQuranRecitation(message: string): Promise<ChatResponse> {
+  private async getDirectQuranRecitation(message: string, language = 'en'): Promise<ChatResponse> {
     const result = await this.mcpService.executeTool('get_quran_recitation', {
       surahName: message,
+      language,
     });
 
     if (isQuranRecitationToolResult(result)) {
@@ -216,6 +222,10 @@ export class ChatService {
       const reply = result.reply.trim() || (media ? getMediaFallbackReply(media) : result.reply);
       return { reply, source: 'model', similarity: null, media };
     }
+
+    const error = result && typeof result === 'object' && 'error' in result
+      ? String((result as { error: unknown }).error)
+      : 'Failed to get Quran recitation.';
 
     return { reply: error, source: 'model', similarity: null };
   }
@@ -268,11 +278,11 @@ export class ChatService {
 
     // 2. Short-circuit: Quran recitation — fetch audio directly without the full agentic loop
     if (intent === 'quran_recitation') {
-      return this.getDirectQuranRecitation(message);
+      return this.getDirectQuranRecitation(message, language);
     }
 
     // 3. Determine whether to skip the RAG cache (real-time or media intents)
-    const skipCache = intent === 'prayer_time' || intent === 'hijri_calendar' || intent === 'quran_recitation';
+    const skipCache = intent === 'prayer_time' || intent === 'hijri_calendar';
     const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
 
     // 4. Search RAG cache
@@ -331,7 +341,7 @@ export class ChatService {
 
     // 2. Short-circuit: Quran recitation
     if (intent === 'quran_recitation') {
-      const result = await this.getDirectQuranRecitation(message);
+      const result = await this.getDirectQuranRecitation(message, language);
       if (result.media) yield { type: 'media', media: result.media };
       yield { type: 'chunk', text: result.reply };
       yield { type: 'done', source: result.source, similarity: result.similarity, media: result.media };
@@ -339,7 +349,7 @@ export class ChatService {
     }
 
     // 3. Determine whether to skip the RAG cache
-    const skipCache = intent === 'prayer_time' || intent === 'hijri_calendar' || intent === 'quran_recitation';
+    const skipCache = intent === 'prayer_time' || intent === 'hijri_calendar';
     const embedding = skipCache ? [] : await this.geminiService.generateEmbedding(normalizedMessage);
 
     // Cache hit — yield full answer as one chunk

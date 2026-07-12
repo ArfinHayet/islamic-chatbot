@@ -90,6 +90,18 @@ export const ISLAMIC_TOOLS = [
           type: 'string',
           description: 'Optional raw surah phrase from the user in any language or transliteration. Do not normalize or correct it before passing it.',
         },
+        startAyah: {
+          type: 'string',
+          description: 'Optional start ayah number (1-based index).',
+        },
+        endAyah: {
+          type: 'string',
+          description: 'Optional end ayah number (1-based index).',
+        },
+        language: {
+          type: 'string',
+          description: 'Optional language code for the response. Detect from the user message. Supported: ar, bn, en, es, fr, id, ru, tr, zh. Default: en',
+        },
       },
     },
   },

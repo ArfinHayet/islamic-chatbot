@@ -96,6 +96,9 @@ interface QuranRecitationMedia {
   reciterName: string;
   audioUrl: string;
   source: string;
+  startAyah?: number | null;
+  endAyah?: number | null;
+  audioUrls?: string[];
 }
 
 interface QuranRecitationResult {
@@ -106,6 +109,12 @@ interface QuranRecitationResult {
 interface QuranSurahRerankResult {
   surahNumber: number | null;
   confidence: 'high' | 'medium' | 'low';
+}
+
+interface ParsedQuranQuery {
+  surahNumber: number | null;
+  startAyah: number | null;
+  endAyah: number | null;
 }
 
 type ToolResult =
@@ -123,6 +132,93 @@ const QURAN_AUDIO_RECITER = {
   source: 'AlQuran.cloud CDN',
   bitrate: 128,
 };
+
+const SURAH_VERSE_COUNTS = [
+  7, 286, 200, 176, 120, 165, 206, 75, 129, 109,
+  123, 111, 43, 52, 99, 128, 111, 110, 98, 135,
+  112, 78, 118, 64, 77, 227, 93, 88, 69, 60,
+  34, 30, 73, 54, 45, 83, 182, 88, 75, 85,
+  54, 53, 89, 59, 37, 35, 38, 29, 18, 45,
+  60, 49, 62, 55, 78, 96, 29, 22, 24, 13,
+  14, 11, 11, 18, 12, 12, 30, 52, 52, 44,
+  28, 28, 20, 56, 40, 31, 50, 40, 46, 42,
+  29, 19, 36, 25, 22, 17, 19, 26, 30, 20,
+  15, 21, 11, 8, 8, 19, 5, 8, 8, 11,
+  11, 8, 3, 9, 5, 4, 7, 3, 6, 3,
+  5, 4, 5, 6
+];
+
+function getGlobalAyahNumber(surahNumber: number, ayahNumber: number): number {
+  let globalNumber = 0;
+  for (let i = 0; i < surahNumber - 1; i++) {
+    globalNumber += SURAH_VERSE_COUNTS[i];
+  }
+  return globalNumber + ayahNumber;
+}
+
+function getRecitationReply(
+  surahName: string,
+  reciterName: string,
+  startAyah: number | null,
+  endAyah: number | null,
+  language: string,
+): string {
+  const isRange = startAyah !== null && endAyah !== null && startAyah !== endAyah;
+  const isSingle = startAyah !== null && (endAyah === null || startAyah === endAyah);
+
+  const translations: Record<string, { full: string; single: string; range: string }> = {
+    en: {
+      full: `Here is Surah ${surahName} recited by ${reciterName}.`,
+      single: `Here is Ayah ${startAyah} of Surah ${surahName} recited by ${reciterName}.`,
+      range: `Here are Ayahs ${startAyah} to ${endAyah} of Surah ${surahName} recited by ${reciterName}.`,
+    },
+    bn: {
+      full: `${reciterName}-এর কণ্ঠে সূরা ${surahName} তিলাওয়াত শুনুন।`,
+      single: `${reciterName}-এর কণ্ঠে সূরা ${surahName}-এর ${startAyah} নং আয়াত তিলাওয়াত শুনুন।`,
+      range: `${reciterName}-এর কণ্ঠে সূরা ${surahName}-এর ${startAyah} থেকে ${endAyah} নং আয়াত তিলাওয়াত শুনুন।`,
+    },
+    ar: {
+      full: `إليك سورة ${surahName} بتلاوة ${reciterName}.`,
+      single: `إليك الآية ${startAyah} من سورة ${surahName} بتلاوة ${reciterName}.`,
+      range: `إليك الآيات من ${startAyah} إلى ${endAyah} من سورة ${surahName} بتلاوة ${reciterName}.`,
+    },
+    tr: {
+      full: `İşte ${reciterName} tarafından okunan ${surahName} Suresi.`,
+      single: `İşte ${reciterName} tarafından okunan ${surahName} Suresi ${startAyah}. ayet.`,
+      range: `İşte ${reciterName} tarafından okunan ${surahName} Suresi ${startAyah} ile ${endAyah} arası ayetler.`,
+    },
+    id: {
+      full: `Berikut Surah ${surahName} yang dilantunkan oleh ${reciterName}.`,
+      single: `Berikut Ayat ${startAyah} dari Surah ${surahName} yang dilantunkan oleh ${reciterName}.`,
+      range: `Berikut Ayat ${startAyah} hingga ${endAyah} dari Surah ${surahName} yang dilantunkan oleh ${reciterName}.`,
+    },
+    es: {
+      full: `Aquí está la Sura ${surahName} recitada por ${reciterName}.`,
+      single: `Aquí está la Aleya ${startAyah} de la Sura ${surahName} recitada por ${reciterName}.`,
+      range: `Aquí están las Aleyas ${startAyah} a ${endAyah} de la Sura ${surahName} recitada por ${reciterName}.`,
+    },
+    fr: {
+      full: `Voici la sourate ${surahName} récitée par ${reciterName}.`,
+      single: `Voici le verset ${startAyah} de la sourate ${surahName} récité par ${reciterName}.`,
+      range: `Voici les versets ${startAyah} à ${endAyah} de la sourate ${surahName} récités par ${reciterName}.`,
+    },
+    ru: {
+      full: `Вот сура ${surahName} в чтении ${reciterName}.`,
+      single: `Вот аят ${startAyah} суры ${surahName} в чтении ${reciterName}.`,
+      range: `Вот аяты с ${startAyah} по ${endAyah} суры ${surahName} в чтении ${reciterName}.`,
+    },
+    zh: {
+      full: `这是由 ${reciterName} 诵读的 ${surahName}。`,
+      single: `这是由 ${reciterName} 诵读的 ${surahName} 第 ${startAyah} 节。`,
+      range: `这是由 ${reciterName} 诵读的 ${surahName} 第 ${startAyah} 至 ${endAyah} 节。`,
+    },
+  };
+
+  const t = translations[language] ?? translations['en'];
+  if (isRange) return t.range;
+  if (isSingle) return t.single;
+  return t.full;
+}
 
 @Injectable()
 export class McpService {
@@ -207,6 +303,80 @@ export class McpService {
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
+  }
+
+  private async parseQuranRecitationQuery(
+    query: string,
+  ): Promise<ParsedQuranQuery> {
+    const prompt =
+      `You are an expert Quran recitation parser.\n` +
+      `Your task is to parse a user's request for Quran audio and extract the Surah number and any specific Ayah or range of Ayahs.\n` +
+      `User request: ${JSON.stringify(query)}\n\n` +
+      `Rules:\n` +
+      `1. Identify the Surah number (1 to 114) from the request. If the name of the Surah is given, map it to its canonical number (e.g., Al-Fatihah is 1, Al-Baqarah is 2, Ya-Sin is 36, etc.).\n` +
+      `2. Identify the start and end Ayah numbers (1-based indices) if specified. If only a single Ayah is requested (e.g. "ayah 255"), both startAyah and endAyah should be that number.\n` +
+      `3. For famous verses, resolve them to their exact Surah and Ayah:\n` +
+      `   - "Ayat al-Kursi" / "Ayatul Kursi" / "آية الكرسي" / "আয়াতুল কুরসি" -> Surah 2, Ayah 255 to 255\n` +
+      `   - "Amanar Rasulu" / "আমানার রাসুলু" -> Surah 2, Ayah 285 to 286\n` +
+      `   - "Last two verses of Surah Al-Baqarah" -> Surah 2, Ayah 285 to 286\n` +
+      `   - "Last ten verses of Ali 'Imran" -> Surah 3, Ayah 190 to 200\n` +
+      `4. If no specific Ayah or range is requested, set startAyah and endAyah to null.\n` +
+      `5. Return only strict JSON in this exact format:\n` +
+      `   {"surahNumber": number | null, "startAyah": number | null, "endAyah": number | null}`;
+
+    const modelName = this.configService.get<string>('gemini.chatModel') ?? 'gemini-2.5-flash';
+    const maxAttempts = (await this.geminiKeyService.getStats()).total || 1;
+    let lastError: Error = new Error('No keys tried');
+
+    for (let attempt = 0; attempt < maxAttempts + 1; attempt++) {
+      const { id, apiKey } = await this.getGeminiApiKey();
+
+      try {
+        const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            responseMimeType: 'application/json' as any,
+          },
+        });
+        const response = await model.generateContent(prompt);
+        const text = response.response.text();
+        const jsonText = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+        const parsed = JSON.parse(jsonText) as Partial<ParsedQuranQuery>;
+
+        const surahNumber =
+          typeof parsed.surahNumber === 'number' && Number.isInteger(parsed.surahNumber) && parsed.surahNumber >= 1 && parsed.surahNumber <= 114
+            ? parsed.surahNumber
+            : null;
+
+        const startAyah =
+          typeof parsed.startAyah === 'number' && Number.isInteger(parsed.startAyah) && parsed.startAyah >= 1
+            ? parsed.startAyah
+            : null;
+
+        const endAyah =
+          typeof parsed.endAyah === 'number' && Number.isInteger(parsed.endAyah) && parsed.endAyah >= 1
+            ? parsed.endAyah
+            : null;
+
+        return { surahNumber, startAyah, endAyah };
+      } catch (error) {
+        lastError = error as Error;
+        if (this.isRateLimitError(error) && id) {
+          this.logger.warn(`MCP query parser key ${id.slice(0, 8)}… rate-limited, rotating...`);
+          await this.geminiKeyService.markRateLimited(id);
+        } else {
+          break;
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  private buildQuranAudioUrlForAyah(surahNumber: number, ayahNumber: number): string {
+    const globalNumber = getGlobalAyahNumber(surahNumber, ayahNumber);
+    return `https://cdn.islamic.network/quran/audio/${QURAN_AUDIO_RECITER.bitrate}/${QURAN_AUDIO_RECITER.edition}/${globalNumber}.mp3`;
   }
 
   private buildQuranAudioUrl(surahNumber: number): string {
@@ -315,37 +485,135 @@ export class McpService {
 
   private async getQuranRecitation(input: Record<string, string>): Promise<QuranRecitationResult | ErrorResult> {
     try {
-      const rawNumber = input.surahNumber?.trim();
-      const numberValue = Number(rawNumber);
+      const language = input.language?.trim() || 'en';
 
-      if (rawNumber && Number.isInteger(numberValue) && numberValue >= 1 && numberValue <= 114) {
-        const surah = await this.ragService.getQuranSurahByNumber(numberValue);
-        return surah ? this.buildQuranRecitationResult(surah) : this.getQuranRecitationNotFoundReply();
+      let surahNumber: number | null = null;
+      let startAyah: number | null = null;
+      let endAyah: number | null = null;
+
+      // 1. If startAyah and endAyah are passed directly (e.g. by agent tool call)
+      if (input.startAyah) {
+        startAyah = Number(input.startAyah);
+      }
+      if (input.endAyah) {
+        endAyah = Number(input.endAyah);
       }
 
-      if (rawNumber) {
-        return this.getQuranRecitationNotFoundReply();
+      // 2. Resolve surahNumber
+      const rawNumber = input.surahNumber?.trim();
+      const numberValue = Number(rawNumber);
+      if (rawNumber && Number.isInteger(numberValue) && numberValue >= 1 && numberValue <= 114) {
+        surahNumber = numberValue;
       }
 
       const rawName = input.surahName?.trim();
-      if (!rawName) {
-        return this.getQuranRecitationClarificationReply();
+
+      // If we don't have surahNumber but we have rawName, try to find/parse it
+      if (!surahNumber && rawName) {
+        // Fast-path: Check exact/contained match in local DB
+        const nameMatch = await this.ragService.findQuranSurahByName(rawName);
+        if (nameMatch) {
+          surahNumber = nameMatch.surah_number;
+        } else {
+          // Parser-path: Parse using Gemini
+          const parsed = await this.parseQuranRecitationQuery(rawName);
+          if (parsed.surahNumber) {
+            surahNumber = parsed.surahNumber;
+            if (parsed.startAyah && !startAyah) {
+              startAyah = parsed.startAyah;
+            }
+            if (parsed.endAyah && !endAyah) {
+              endAyah = parsed.endAyah;
+            }
+          }
+        }
       }
 
-      const nameMatch = await this.ragService.findQuranSurahByName(rawName);
-      if (nameMatch) {
-        return this.buildQuranRecitationResult(nameMatch);
+      // If we STILL don't have surahNumber but we have rawName, try embedding search + rerank as fallback
+      if (!surahNumber && rawName) {
+        const embedding = await this.embedWithRotation(rawName);
+        const candidates = await this.ragService.searchQuranSurahCandidates(embedding, 8);
+        const reranked = await this.rerankQuranSurahCandidates(rawName, candidates);
+        if (reranked) {
+          surahNumber = reranked.surah_number;
+        }
       }
 
-      const embedding = await this.embedWithRotation(rawName);
-      const candidates = await this.ragService.searchQuranSurahCandidates(embedding, 8);
-      const surah = await this.rerankQuranSurahCandidates(rawName, candidates);
+      // If no surahName and no surahNumber, ask for clarification
+      if (!surahNumber) {
+        if (!rawName) {
+          return this.getQuranRecitationClarificationReply();
+        }
+        return this.getQuranRecitationNotFoundReply();
+      }
 
+      // Retrieve the surah from DB
+      const surah = await this.ragService.getQuranSurahByNumber(surahNumber);
       if (!surah) {
         return this.getQuranRecitationNotFoundReply();
       }
 
-      return this.buildQuranRecitationResult(surah);
+      // Validate ayah bounds
+      const maxVerses = SURAH_VERSE_COUNTS[surah.surah_number - 1];
+      if (startAyah && (startAyah < 1 || startAyah > maxVerses)) {
+        const nameLocalized = language === 'bn' ? surah.name_bn : surah.name_en;
+        const msg = language === 'bn'
+          ? `সূরা ${nameLocalized}-এ কেবল ${maxVerses}টি আয়াত রয়েছে। অনুগ্রহ করে ১ থেকে ${maxVerses}-এর মধ্যে আয়াত নম্বর বলুন।`
+          : `Surah ${nameLocalized} only has ${maxVerses} verses. Please request verses between 1 and ${maxVerses}.`;
+        return { reply: msg };
+      }
+
+      if (endAyah) {
+        if (endAyah < 1) endAyah = 1;
+        if (endAyah > maxVerses) endAyah = maxVerses;
+      }
+
+      if (startAyah && endAyah && startAyah > endAyah) {
+        const temp = startAyah;
+        startAyah = endAyah;
+        endAyah = temp;
+      }
+
+      // Build the recitation media result
+      const nameLocalized = language === 'bn' ? surah.name_bn : surah.name_en;
+      const reciterName = QURAN_AUDIO_RECITER.name;
+
+      let reply = '';
+      let media: QuranRecitationMedia;
+
+      if (startAyah) {
+        const actualEndAyah = endAyah || startAyah;
+        const audioUrl = this.buildQuranAudioUrlForAyah(surah.surah_number, startAyah);
+        const audioUrls: string[] = [];
+        for (let a = startAyah; a <= actualEndAyah; a++) {
+          audioUrls.push(this.buildQuranAudioUrlForAyah(surah.surah_number, a));
+        }
+
+        reply = getRecitationReply(nameLocalized, reciterName, startAyah, actualEndAyah, language);
+        media = {
+          type: 'quran_recitation',
+          surahNumber: surah.surah_number,
+          surahName: surah.name_en,
+          reciterName,
+          audioUrl,
+          audioUrls,
+          startAyah,
+          endAyah: actualEndAyah,
+          source: QURAN_AUDIO_RECITER.source,
+        };
+      } else {
+        reply = getRecitationReply(nameLocalized, reciterName, null, null, language);
+        media = {
+          type: 'quran_recitation',
+          surahNumber: surah.surah_number,
+          surahName: surah.name_en,
+          reciterName,
+          audioUrl: this.buildQuranAudioUrl(surah.surah_number),
+          source: QURAN_AUDIO_RECITER.source,
+        };
+      }
+
+      return { reply, media };
     } catch (error) {
       this.logger.warn(`Quran recitation lookup failed: ${(error as Error).message}`);
       return {
