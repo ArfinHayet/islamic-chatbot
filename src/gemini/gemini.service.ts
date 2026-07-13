@@ -459,31 +459,40 @@ export class GeminiService {
 
     for (let i = 0; i < maxIterations; i++) {
       const parts = result.response.candidates?.[0]?.content?.parts ?? [];
-      const functionCallPart = parts.find((p) => 'functionCall' in p && p.functionCall);
+      const functionCallParts = parts.filter((p) => 'functionCall' in p && p.functionCall);
 
-      if (!functionCallPart?.functionCall) {
+      if (functionCallParts.length === 0) {
         return { text: result.response.text(), media: media.length ? media : undefined };
       }
 
-      const { name, args } = functionCallPart.functionCall;
-      this.logger.log(`Tool call: ${name}(${JSON.stringify(args)})`);
-
-      const toolResult = await this.mcpService.executeTool(
-        name,
-        args as Record<string, string>,
-      );
-      this.logger.log(`Tool result [${name}]: ${JSON.stringify(toolResult)}`);
-      const toolMedia = this.extractToolMedia(toolResult);
-      if (toolMedia) media.push(toolMedia);
-
-      result = await chatSession.sendMessage([
-        {
-          functionResponse: {
+      const responses = await Promise.all(
+        functionCallParts.map(async (part) => {
+          const { name, args } = part.functionCall!;
+          this.logger.log(`Tool call: ${name}(${JSON.stringify(args)})`);
+          const toolResult = await this.mcpService.executeTool(
             name,
-            response: { result: JSON.stringify(toolResult) },
+            args as Record<string, string>,
+          );
+          this.logger.log(`Tool result [${name}]: ${JSON.stringify(toolResult)}`);
+          const toolMedia = this.extractToolMedia(toolResult);
+          return { name, toolResult, toolMedia };
+        }),
+      );
+
+      for (const res of responses) {
+        if (res.toolMedia) {
+          media.push(res.toolMedia);
+        }
+      }
+
+      result = await chatSession.sendMessage(
+        responses.map((res) => ({
+          functionResponse: {
+            name: res.name,
+            response: { result: JSON.stringify(res.toolResult) },
           },
-        },
-      ]);
+        })),
+      );
     }
 
     return { text: result.response.text(), media: media.length ? media : undefined };
@@ -597,23 +606,35 @@ export class GeminiService {
       // Resolve full response to get complete function call args
       const response = await streamResult.response;
       const parts = response.candidates?.[0]?.content?.parts ?? [];
-      const funcCallPart = parts.find((p) => 'functionCall' in p && p.functionCall);
-      if (!funcCallPart?.functionCall) return;
+      const functionCallParts = parts.filter((p) => 'functionCall' in p && p.functionCall);
+      if (functionCallParts.length === 0) return;
 
-      const { name, args } = funcCallPart.functionCall;
-      this.logger.log(`Tool call: ${name}(${JSON.stringify(args)})`);
-
-      const toolResult = await this.mcpService.executeTool(
-        name,
-        args as Record<string, string>,
+      const responses = await Promise.all(
+        functionCallParts.map(async (part) => {
+          const { name, args } = part.functionCall!;
+          this.logger.log(`Tool call: ${name}(${JSON.stringify(args)})`);
+          const toolResult = await this.mcpService.executeTool(
+            name,
+            args as Record<string, string>,
+          );
+          this.logger.log(`Tool result [${name}]: ${JSON.stringify(toolResult)}`);
+          const toolMedia = this.extractToolMedia(toolResult);
+          return { name, toolResult, toolMedia };
+        }),
       );
-      this.logger.log(`Tool result [${name}]: ${JSON.stringify(toolResult)}`);
-      const toolMedia = this.extractToolMedia(toolResult);
-      if (toolMedia) yield { type: 'media', media: toolMedia };
 
-      pendingMessage = [
-        { functionResponse: { name, response: { result: JSON.stringify(toolResult) } } },
-      ];
+      for (const res of responses) {
+        if (res.toolMedia) {
+          yield { type: 'media', media: res.toolMedia };
+        }
+      }
+
+      pendingMessage = responses.map((res) => ({
+        functionResponse: {
+          name: res.name,
+          response: { result: JSON.stringify(res.toolResult) },
+        },
+      }));
     }
 
     throw new Error('Max tool iterations reached');

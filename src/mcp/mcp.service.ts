@@ -657,8 +657,8 @@ export class McpService {
           let tafsirText: string | undefined;
           try {
             const tafsirs = await this.ragService.getQuranTafsir(v.chapter_number, v.verse_number, v.verse_number);
-            if (tafsirs.length > 0) {
-              tafsirText = tafsirs[0].text_plain || tafsirs[0].text_html.replace(/<[^>]+>/g, '').trim() || undefined;
+            if (tafsirs?.length > 0) {
+              tafsirText = tafsirs[0].text_plain || tafsirs[0].text_html?.replace(/<[^>]+>/g, '')?.trim() || undefined;
             }
           } catch (dbErr) {
             this.logger.warn(
