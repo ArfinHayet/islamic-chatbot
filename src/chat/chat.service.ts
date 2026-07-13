@@ -73,6 +73,8 @@ For Quran recitation requests in ANY language, such as "recite Surah Yasin", "pl
        Surah [Name] ([surah]:[ayah]):
        Arabic: [text_ar from tool result]
        Translation: [translation from tool result]
+       Tafsir: [tafsir from tool result if available]
+   - Translate the Tafsir text into the user's language if they are writing in a non-English language (e.g. Bengali, Turkish, Indonesian, etc.).
    - If multiple verses are relevant, include up to 5, each with its own reference
 
 2. HADITH:

@@ -70,6 +70,7 @@ interface QuranResult {
   arabicName: string;
   text_ar: string;
   translation: string;
+  tafsir?: string;
 }
 
 interface HadithResult {
@@ -651,12 +652,31 @@ export class McpService {
         return { found: false, message: `No verses found in database for: ${keyword}` };
       }
 
-      return verses.map((v) => ({
-        reference: `Surah ${v.chapter_name} (${v.chapter_number}:${v.verse_number})`,
-        arabicName: v.chapter_name,
-        text_ar: v.text_ar,
-        translation: v.translation ?? v.text_ar,
-      }));
+      const results = await Promise.all(
+        verses.map(async (v) => {
+          let tafsirText: string | undefined;
+          try {
+            const tafsirs = await this.ragService.getQuranTafsir(v.chapter_number, v.verse_number, v.verse_number);
+            if (tafsirs.length > 0) {
+              tafsirText = tafsirs[0].text_plain || tafsirs[0].text_html.replace(/<[^>]+>/g, '').trim() || undefined;
+            }
+          } catch (dbErr) {
+            this.logger.warn(
+              `Failed to fetch tafsir for Surah ${v.chapter_number} Ayah ${v.verse_number}: ${(dbErr as Error).message}`,
+            );
+          }
+
+          return {
+            reference: `Surah ${v.chapter_name} (${v.chapter_number}:${v.verse_number})`,
+            arabicName: v.chapter_name,
+            text_ar: v.text_ar,
+            translation: v.translation ?? v.text_ar,
+            tafsir: tafsirText,
+          };
+        }),
+      );
+
+      return results;
     } catch (error) {
       this.logger.warn(`Quran search failed for "${keyword}": ${(error as Error).message}`);
       return { error: `Failed to search Quran: ${(error as Error).message}` };
