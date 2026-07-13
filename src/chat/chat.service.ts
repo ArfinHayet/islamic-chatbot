@@ -369,7 +369,7 @@ export class ChatService {
     userHistory.push({ role: 'model', parts: [{ text: reply }] });
 
     // 9. Save to cache
-    if (!skipCache) {
+    if (!skipCache && (reply.trim() || media)) {
       this.ragService
         .saveToCache(normalizedMessage, reply, embedding, media)
         .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
@@ -460,7 +460,7 @@ export class ChatService {
 
     userHistory.push({ role: 'model', parts: [{ text: fullReply }] });
 
-    if (!skipCache) {
+    if (!skipCache && (fullReply.trim() || media)) {
       this.ragService
         .saveToCache(normalizedMessage, fullReply, embedding, media)
         .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
