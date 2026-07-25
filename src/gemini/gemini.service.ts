@@ -640,6 +640,51 @@ export class GeminiService {
     throw new Error('Max tool iterations reached');
   }
 
+  /**
+   * Generate structured JSON output from Gemini using JSON mode.
+   * Reuses key rotation and rate-limit retry logic.
+   * Used by GameService for scenario generation.
+   */
+  async generateStructuredJson<T>(
+    prompt: string,
+    responseSchema: Record<string, unknown>,
+  ): Promise<T> {
+    const totalKeys = (await this.geminiKeyService.getStats()).total || 1;
+    let lastError: Error = new Error('No keys tried');
+
+    for (let attempt = 0; attempt < totalKeys + 1; attempt++) {
+      const { id, apiKey } = await this.nextKey();
+
+      try {
+        const model = new GoogleGenerativeAI(apiKey).getGenerativeModel({
+          model: this.chatModel,
+          systemInstruction: prompt,
+          generationConfig: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            responseMimeType: 'application/json' as any,
+            responseSchema: responseSchema as any,
+            temperature: 0.8,
+          },
+        });
+
+        const result = await model.generateContent('Generate one scenario now.');
+        const raw = result.response.text().trim();
+        return JSON.parse(raw) as T;
+      } catch (err) {
+        lastError = err as Error;
+        if (this.isRateLimitError(err) && id) {
+          this.logger.warn(`Structured JSON key ${id.slice(0, 8)}… rate-limited, rotating...`);
+          await this.geminiKeyService.markRateLimited(id);
+        } else {
+          break;
+        }
+      }
+    }
+
+    this.logger.error(`Structured JSON generation failed: ${lastError.message}`);
+    throw lastError;
+  }
+
   private extractToolMedia(toolResult: unknown): unknown | null {
     if (
       toolResult &&

@@ -15,6 +15,8 @@ import { AuthModule } from './auth/auth.module';
 import { ChatModule } from './chat/chat.module';
 import { CommonModule } from './common/common.module';
 import { GeminiModule } from './gemini/gemini.module';
+import { GameModule } from './game/game.module';
+import { ScenarioBankEntity } from './game/entities/scenario-bank.entity';
 import { McpModule } from './mcp/mcp.module';
 import { RagModule } from './rag/rag.module';
 
@@ -29,7 +31,7 @@ import { RagModule } from './rag/rag.module';
         ssl: { rejectUnauthorized: false },
         synchronize: false,
         logging: false,
-        entities: [CacheEntity, QuranVerseEntity, QuranSurahEntity, HadithEntity, GeminiKeyEntity, MessageLogEntity, QuranTafsirEntity],
+        entities: [CacheEntity, QuranVerseEntity, QuranSurahEntity, HadithEntity, GeminiKeyEntity, MessageLogEntity, QuranTafsirEntity, ScenarioBankEntity],
       }),
     }),
     ThrottlerModule.forRootAsync({
@@ -46,6 +48,7 @@ import { RagModule } from './rag/rag.module';
     CommonModule,
     AuthModule,
     ChatModule,
+    GameModule,
     GeminiModule,
     McpModule,
     RagModule,

@@ -1,0 +1,394 @@
+[
+  {
+    "level": 1,
+    "district": "home",
+    "locale": "en",
+    "situation": "You find a small amount of money tucked inside a library book you borrowed from your neighbor. They haven't mentioned losing anything, and you could really use the extra cash this month.",
+    "options": [
+      {
+        "text": "Return the money to your neighbor and mention where you found it.",
+        "virtue": "honesty",
+        "delta": 3,
+        "reflection": "Returning what belongs to others, even when no one would know, reflects a character that values truth over convenience. The trustworthy person is beloved in both this life and the next."
+      },
+      {
+        "text": "Keep the money but make a mental note to help your neighbor out sometime soon.",
+        "virtue": "generosity",
+        "delta": 1,
+        "reflection": "Good intentions matter, but they carry more weight when paired with honest action. Delayed goodness risks becoming a promise we forget to keep."
+      },
+      {
+        "text": "Set the money aside and wait to see if your neighbor ever asks about it.",
+        "virtue": "patience",
+        "delta": 2,
+        "reflection": "Waiting can be wise, but when you already know the right owner, patience becomes a reason to postpone what conscience already decided."
+      }
+    ]
+  },
+  {
+    "level": 1,
+    "district": "home",
+    "locale": "en",
+    "situation": "Your elderly neighbor has been struggling to carry groceries up the stairs lately. Today you notice them at the entrance, clearly exhausted, with several heavy bags. You're running late for an important personal errand.",
+    "options": [
+      {
+        "text": "Stop and help carry the groceries upstairs, accepting you'll be late.",
+        "virtue": "compassion",
+        "delta": 3,
+        "reflection": "The one who relieves a hardship from another person will find their own burdens lightened. Small acts of mercy ripple outward in ways we rarely see."
+      },
+      {
+        "text": "Offer a quick greeting and suggest they ask the building caretaker for help.",
+        "virtue": "patience",
+        "delta": 1,
+        "reflection": "Pointing someone to help is not wrong, but when the help needed is right in front of us, redirecting can feel like stepping around a responsibility placed in our path."
+      },
+      {
+        "text": "Carry one load up quickly and let them know you'll check on them when you return.",
+        "virtue": "justice",
+        "delta": 2,
+        "reflection": "Balancing your obligations with the needs of others shows wisdom. Doing what you can, even partially, is better than doing nothing at all."
+      }
+    ]
+  },
+  {
+    "level": 1,
+    "district": "marketplace",
+    "locale": "en",
+    "situation": "A street vendor accidentally gives you extra change — about double what you were owed. The vendor is busy with other customers and clearly hasn't noticed the mistake.",
+    "options": [
+      {
+        "text": "Count the change carefully and return the extra amount to the vendor.",
+        "virtue": "honesty",
+        "delta": 2,
+        "reflection": "Honesty in small transactions builds a character that can be trusted in large ones. The marketplace is a mirror of our inner integrity."
+      },
+      {
+        "text": "Quietly pocket the extra change — it's the vendor's mistake, not yours.",
+        "virtue": "justice",
+        "delta": 1,
+        "reflection": "While it may feel like the other person's error, keeping what isn't rightfully ours chips away at the fairness we'd want others to show us."
+      },
+      {
+        "text": "Return the extra and gently point out the mistake so the vendor can be more careful.",
+        "virtue": "generosity",
+        "delta": 3,
+        "reflection": "Going beyond returning what's owed to help someone improve shows a generous spirit. The best transactions leave both sides better off than before."
+      }
+    ]
+  },
+  {
+    "level": 1,
+    "district": "marketplace",
+    "locale": "en",
+    "situation": "You overhear a shopkeeper charging a tourist significantly more than the usual price for a common item. The tourist doesn't seem to know local prices and is about to pay.",
+    "options": [
+      {
+        "text": "Politely inform the tourist of the fair price range before they pay.",
+        "virtue": "justice",
+        "delta": 3,
+        "reflection": "Standing up for fairness, even when it's not your transaction, upholds the trust that holds a community together. Justice benefits everyone in the long run."
+      },
+      {
+        "text": "Mind your own business — bargaining is part of the market culture.",
+        "virtue": "patience",
+        "delta": 1,
+        "reflection": "While respecting market customs has value, silence in the face of clear unfairness can make us complicit. Choosing not to act is itself a choice."
+      },
+      {
+        "text": "After the tourist pays, quietly suggest to the shopkeeper that fairness brings repeat customers.",
+        "virtue": "humility",
+        "delta": 2,
+        "reflection": "Offering advice privately and gently shows respect for the shopkeeper's dignity. Correcting others is most effective when done without embarrassing them."
+      }
+    ]
+  },
+  {
+    "level": 1,
+    "district": "madrasa",
+    "locale": "en",
+    "situation": "During a group study session, your classmate is struggling to understand a concept that comes easily to you. The session is limited in time, and spending time helping them means you'll cover less material for your own upcoming assessment.",
+    "options": [
+      {
+        "text": "Take the time to explain the concept clearly, even if it slows your own progress.",
+        "virtue": "patience",
+        "delta": 3,
+        "reflection": "Teaching others deepens your own understanding and earns a reward that outlasts any exam score. The one who helps others learn walks a path of lasting benefit."
+      },
+      {
+        "text": "Share your notes with them to review later and continue with your own study.",
+        "virtue": "generosity",
+        "delta": 2,
+        "reflection": "Sharing resources is a form of generosity that respects both your needs and theirs. Not every act of help requires sacrificing your own preparation."
+      },
+      {
+        "text": "Suggest they ask the teacher after the session for a more thorough explanation.",
+        "virtue": "honesty",
+        "delta": 1,
+        "reflection": "Recognizing your limits and directing someone to a better source can be honest, but when help is within reach, the heart knows the difference between wisdom and avoidance."
+      }
+    ]
+  },
+
+  {
+    "level": 2,
+    "district": "home",
+    "locale": "en",
+    "situation": "Your younger sibling broke an item belonging to your parent while playing carelessly. They come to you in tears, terrified of the consequences, and beg you not to tell. Your parent will likely notice the item is missing within a day or two.",
+    "options": [
+      {
+        "text": "Encourage your sibling to confess on their own and offer to be there with them for support.",
+        "virtue": "patience",
+        "delta": 3,
+        "reflection": "Guiding someone toward owning their mistakes, while standing beside them, combines patience with genuine care. Growth happens when people face consequences with support, not in isolation."
+      },
+      {
+        "text": "Help your sibling try to repair or replace the item before your parent notices.",
+        "virtue": "compassion",
+        "delta": 2,
+        "reflection": "Shielding someone from immediate pain can come from love, but true compassion considers whether it also teaches or merely postpones a harder lesson."
+      },
+      {
+        "text": "Tell your parent what happened, since honesty in the family matters most.",
+        "virtue": "honesty",
+        "delta": 2,
+        "reflection": "Honesty within a family builds lasting trust, though delivering truth without giving the other person a chance to own it can sometimes feel more like reporting than caring."
+      }
+    ]
+  },
+  {
+    "level": 2,
+    "district": "home",
+    "locale": "en",
+    "situation": "A family member frequently boasts about their achievements at gatherings, sometimes exaggerating or taking credit for group efforts. At tonight's dinner, they've just told a story that significantly overstates their role in a project you both worked on.",
+    "options": [
+      {
+        "text": "Let it go — correcting them at the dinner table would cause unnecessary tension.",
+        "virtue": "humility",
+        "delta": 2,
+        "reflection": "Choosing silence over public correction can preserve family harmony. Sometimes the most humble act is letting go of credit you deserve."
+      },
+      {
+        "text": "Gently add context by sharing your own experience of the project, without directly contradicting them.",
+        "virtue": "justice",
+        "delta": 3,
+        "reflection": "Restoring fairness while preserving someone's dignity is a delicate balance. Truth delivered with kindness corrects without wounding."
+      },
+      {
+        "text": "Speak to them privately after dinner about how their habit of exaggeration makes others feel.",
+        "virtue": "honesty",
+        "delta": 2,
+        "reflection": "Private counsel shows respect for the other person's feelings while still addressing the issue. The best advice is given where only the one who needs it can hear."
+      }
+    ]
+  },
+  {
+    "level": 2,
+    "district": "marketplace",
+    "locale": "en",
+    "situation": "You discover that a product you recently bought from a small local shop has a minor defect. The shop has a strict no-return policy, and the shopkeeper is already struggling financially. The defect is small enough that you could live with it.",
+    "options": [
+      {
+        "text": "Go back and calmly explain the defect, asking if they can offer any resolution even within their policy.",
+        "virtue": "honesty",
+        "delta": 3,
+        "reflection": "Raising an issue respectfully gives the other party a chance to do right, without demanding it. Honest communication builds better relationships than silent resentment."
+      },
+      {
+        "text": "Accept the defect and continue supporting the shop — they need customers more than you need a perfect product.",
+        "virtue": "generosity",
+        "delta": 2,
+        "reflection": "Absorbing a small loss to support someone in difficulty is a quiet form of generosity. The strongest communities are built on people willing to overlook minor imperfections."
+      },
+      {
+        "text": "Leave a fair review mentioning both the product quality and the shop's good service, so future customers can make informed choices.",
+        "virtue": "justice",
+        "delta": 2,
+        "reflection": "Balancing fairness to future customers with kindness to the shopkeeper shows mature judgment. Truth and mercy can coexist in the same sentence."
+      }
+    ]
+  },
+  {
+    "level": 2,
+    "district": "madrasa",
+    "locale": "en",
+    "situation": "During a group discussion, a classmate confidently shares an opinion that you know is factually incorrect. Several others are nodding along. The topic is one where misinformation could lead people to make poor decisions.",
+    "options": [
+      {
+        "text": "Respectfully share the correct information with evidence, even though it means disagreeing publicly.",
+        "virtue": "justice",
+        "delta": 2,
+        "reflection": "Correcting misinformation is a responsibility, especially when others might be affected. Speaking truth with courtesy turns a correction into a gift."
+      },
+      {
+        "text": "Ask a thoughtful question that leads the group to discover the correct answer on their own.",
+        "virtue": "compassion",
+        "delta": 3,
+        "reflection": "Guiding others toward truth without embarrassing them preserves their dignity and deepens their understanding. The wisest teachers ask questions rather than deliver lectures."
+      },
+      {
+        "text": "Speak to your classmate privately after the discussion to share what you know.",
+        "virtue": "humility",
+        "delta": 2,
+        "reflection": "Private correction spares public embarrassment, though the group's misunderstanding may persist. Timing and audience matter as much as the truth itself."
+      }
+    ]
+  },
+  {
+    "level": 2,
+    "district": "madrasa",
+    "locale": "en",
+    "situation": "You're assigned to work on a group project with a classmate who has a reputation for not contributing their fair share. Previous groups have complained, but no one has addressed it directly with this person.",
+    "options": [
+      {
+        "text": "Have an honest conversation with them at the start, clearly dividing tasks and setting expectations together.",
+        "virtue": "justice",
+        "delta": 3,
+        "reflection": "Addressing problems directly and early prevents resentment from growing. Fair expectations, communicated kindly, give everyone a chance to rise to the occasion."
+      },
+      {
+        "text": "Do extra work yourself to compensate, and focus on making the project excellent regardless.",
+        "virtue": "patience",
+        "delta": 1,
+        "reflection": "Absorbing extra burden silently may complete the task, but it neither helps your classmate grow nor addresses the pattern. Patience without honesty can enable what it endures."
+      },
+      {
+        "text": "Pair up with them on tasks so you work side by side, making it easier for them to contribute naturally.",
+        "virtue": "compassion",
+        "delta": 2,
+        "reflection": "Working alongside someone rather than around them shows faith in their potential. Sometimes people don't contribute not from laziness but from not knowing how to begin."
+      }
+    ]
+  },
+
+  {
+    "level": 3,
+    "district": "home",
+    "locale": "en",
+    "situation": "Your parent asks your honest opinion about a major life decision they're considering — one that you genuinely believe is unwise based on what you know. However, they seem emotionally invested and have already started making plans. Disagreeing could cause significant family tension.",
+    "options": [
+      {
+        "text": "Share your honest concerns thoughtfully, presenting your reasoning while acknowledging their perspective and experience.",
+        "virtue": "justice",
+        "delta": 3,
+        "reflection": "Honoring those who raised us doesn't mean silencing our conscience. The deepest respect is offering sincere counsel while leaving the final choice in their hands."
+      },
+      {
+        "text": "Express support while subtly raising a few practical questions that might lead them to reconsider on their own.",
+        "virtue": "humility",
+        "delta": 2,
+        "reflection": "Guiding without directing preserves their autonomy and your relationship. Sometimes the gentlest influence creates the most lasting change."
+      },
+      {
+        "text": "Support their decision fully — they asked for your opinion but they've clearly already decided, and family harmony matters.",
+        "virtue": "patience",
+        "delta": 2,
+        "reflection": "Choosing peace over being right has its own wisdom, though when someone asks for honesty, silence becomes its own form of answer."
+      }
+    ]
+  },
+  {
+    "level": 3,
+    "district": "marketplace",
+    "locale": "en",
+    "situation": "You learn that a competitor in your trade has been spreading false rumors about the quality of your products to steal your customers. A mutual contact offers to spread counter-rumors about the competitor's business practices — some true, some exaggerated — to 'even the score.'",
+    "options": [
+      {
+        "text": "Decline the offer and instead focus on letting the quality of your work speak for itself over time.",
+        "virtue": "patience",
+        "delta": 2,
+        "reflection": "Trusting that truth surfaces eventually requires enormous patience, but it keeps your own hands clean. A reputation built on genuine quality outlasts any rumor campaign."
+      },
+      {
+        "text": "Decline the counter-rumors but address the situation directly — confront the competitor privately and ask them to stop.",
+        "virtue": "honesty",
+        "delta": 3,
+        "reflection": "Facing a wrong directly, without stooping to the same tactics, is the harder but nobler path. The one who refuses to fight injustice with injustice protects their own soul first."
+      },
+      {
+        "text": "Accept only the truthful information being shared about the competitor — the public deserves to know the facts.",
+        "virtue": "justice",
+        "delta": 2,
+        "reflection": "There is a line between exposing truth and weaponizing it. Even accurate information, shared with the intent to harm, can corrupt the justice it claims to serve."
+      }
+    ]
+  },
+  {
+    "level": 3,
+    "district": "marketplace",
+    "locale": "en",
+    "situation": "A loyal, long-time customer asks you for a significant discount on a large order, citing personal financial hardship. Giving the discount would cut into your already thin profit margins during a slow season, and you have your own bills to pay. Refusing might lose a relationship you value.",
+    "options": [
+      {
+        "text": "Offer a smaller discount than requested and explain your own situation honestly, seeking a middle ground.",
+        "virtue": "humility",
+        "delta": 3,
+        "reflection": "Vulnerability in admitting your own limitations turns a negotiation into a human connection. The best deals leave both parties feeling seen and respected."
+      },
+      {
+        "text": "Give the full discount — this person has supported your business for years and you trust that the goodwill will return to you.",
+        "virtue": "generosity",
+        "delta": 2,
+        "reflection": "Generosity during hardship is the most meaningful kind, but it must be weighed against the responsibility not to harm yourself and those who depend on you."
+      },
+      {
+        "text": "Politely decline the discount but offer extended payment terms or other creative solutions to help them.",
+        "virtue": "justice",
+        "delta": 2,
+        "reflection": "Fairness doesn't always mean saying yes. Finding alternative ways to help shows that care and business sense can work together."
+      }
+    ]
+  },
+  {
+    "level": 3,
+    "district": "madrasa",
+    "locale": "en",
+    "situation": "You discover that a well-liked teacher has been giving slightly preferential treatment to students from wealthier families — not dramatically, but in subtle ways: more attention, better project assignments, warmer feedback. You respect this teacher and have benefited from their guidance yourself.",
+    "options": [
+      {
+        "text": "Bring up the pattern privately with the teacher, framing it as an observation rather than an accusation, and trusting their good intentions.",
+        "virtue": "honesty",
+        "delta": 3,
+        "reflection": "Addressing bias in someone you respect requires courage and tact in equal measure. The most valuable feedback often comes from those who care enough to risk the relationship."
+      },
+      {
+        "text": "Raise the concern through proper institutional channels anonymously, so it can be addressed without personal conflict.",
+        "virtue": "justice",
+        "delta": 2,
+        "reflection": "Using systems designed for accountability shows trust in community structures. Sometimes justice is best served through channels that protect both the one reporting and the one being corrected."
+      },
+      {
+        "text": "Focus on mentoring the overlooked students yourself, compensating for the gap rather than confronting the teacher.",
+        "virtue": "compassion",
+        "delta": 2,
+        "reflection": "Direct action to help those affected is powerful and immediate. Yet addressing the root cause and the symptom together creates more lasting change than either alone."
+      }
+    ]
+  },
+  {
+    "level": 3,
+    "district": "madrasa",
+    "locale": "en",
+    "situation": "During an important assessment, you notice that the student sitting next to you — someone under enormous family pressure to succeed — is clearly copying answers from a hidden reference. Reporting them could end their academic career. Saying nothing feels dishonest to the other students who prepared fairly.",
+    "options": [
+      {
+        "text": "Subtly signal to the student to stop, giving them a chance to correct their own behavior without reporting them.",
+        "virtue": "compassion",
+        "delta": 2,
+        "reflection": "Offering a silent warning balances mercy with honesty. It gives someone a chance to choose right without the irreversible consequences of exposure."
+      },
+      {
+        "text": "Report what you saw to the instructor after the assessment — the integrity of the evaluation matters for everyone.",
+        "virtue": "justice",
+        "delta": 2,
+        "reflection": "Upholding fairness protects every student who prepared honestly. Justice can feel heavy when it affects someone we sympathize with, but its absence harms the many to spare the one."
+      },
+      {
+        "text": "Speak to the student privately after the test — understand their situation and encourage them to approach the teacher themselves.",
+        "virtue": "generosity",
+        "delta": 3,
+        "reflection": "Giving someone the dignity of self-correction is the most generous form of accountability. The best outcomes come when people choose honesty rather than having it forced upon them."
+      }
+    ]
+  }
+]
