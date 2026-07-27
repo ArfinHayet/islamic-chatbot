@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { GeminiService, GeminiMessage, IntentResult, MessageIntent } from '../gemini/gemini.service';
+import { GeminiService, GeminiMessage, IntentResult, MessageIntent, sanitizeModelOutput } from '../gemini/gemini.service';
 import { RagService } from '../rag/rag.service';
 import { ISLAMIC_TOOLS } from '../mcp/tools/islamic.tools';
 import { McpService } from '../mcp/mcp.service';
@@ -224,6 +224,26 @@ function isQuranRecitationToolResult(value: unknown): value is { reply: string; 
   );
 }
 
+/**
+ * Maximum number of messages (user + model) to keep in conversation history.
+ * Each Islamic Q&A response can be 3,000–8,000 tokens (Quran Arabic + translation +
+ * tafsir + hadith). Keeping too many rounds causes context overflow → empty responses
+ * or 'Chat service unavailable'. 6 messages = 3 Q&A pairs is a safe balance.
+ */
+const MAX_HISTORY_MESSAGES = 6;
+
+/**
+ * Maximum character length for model responses stored in conversation history.
+ * Full responses are already streamed to the user and cached in RAG — the history
+ * only needs enough context for the model to understand what was previously discussed.
+ */
+const MAX_HISTORY_RESPONSE_LENGTH = 800;
+
+function truncateForHistory(text: string): string {
+  if (text.length <= MAX_HISTORY_RESPONSE_LENGTH) return text;
+  return text.slice(0, MAX_HISTORY_RESPONSE_LENGTH) + '… [truncated]';
+}
+
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
@@ -247,9 +267,9 @@ export class ChatService {
     }
     const userHistory = this.history.get(userId) as GeminiMessage[];
     userHistory.push({ role: 'user', parts: [{ text: userText }] });
-    userHistory.push({ role: 'model', parts: [{ text: modelText }] });
-    if (userHistory.length > 10) {
-      userHistory.splice(0, userHistory.length - 10);
+    userHistory.push({ role: 'model', parts: [{ text: truncateForHistory(modelText) }] });
+    if (userHistory.length > MAX_HISTORY_MESSAGES) {
+      userHistory.splice(0, userHistory.length - MAX_HISTORY_MESSAGES);
     }
   }
 
@@ -342,14 +362,14 @@ export class ChatService {
       }
     }
 
-    // 5. Build history for this user (keep last 10 messages)
+    // 5. Build history for this user
     if (!this.history.has(userId)) {
       this.history.set(userId, []);
     }
     const userHistory = this.history.get(userId) as GeminiMessage[];
     userHistory.push({ role: 'user', parts: [{ text: message }] });
-    if (userHistory.length > 10) {
-      userHistory.splice(0, userHistory.length - 10);
+    if (userHistory.length > MAX_HISTORY_MESSAGES) {
+      userHistory.splice(0, userHistory.length - MAX_HISTORY_MESSAGES);
     }
 
     // 6. Select tools & build custom system prompt
@@ -365,8 +385,8 @@ export class ChatService {
     const media = agentResult.media?.find(isChatMedia);
     const reply = agentResult.text.trim() || (media ? getMediaFallbackReply(media) : agentResult.text);
 
-    // 8. Add assistant reply to history
-    userHistory.push({ role: 'model', parts: [{ text: reply }] });
+    // 8. Add assistant reply to history (truncated to save context budget)
+    userHistory.push({ role: 'model', parts: [{ text: truncateForHistory(reply) }] });
 
     // 9. Save to cache
     if (!skipCache && (reply.trim() || media)) {
@@ -388,7 +408,7 @@ export class ChatService {
     if (!this.history.has(userId)) this.history.set(userId, []);
     const userHistory = this.history.get(userId) as GeminiMessage[];
     userHistory.push({ role: 'user', parts: [{ text: message }] });
-    if (userHistory.length > 10) userHistory.splice(0, userHistory.length - 10);
+    if (userHistory.length > MAX_HISTORY_MESSAGES) userHistory.splice(0, userHistory.length - MAX_HISTORY_MESSAGES);
 
 
     // 2. Short-circuit: Quran recitation
@@ -427,13 +447,17 @@ export class ChatService {
     const useTools = (intent === 'greeting' || intent === 'off_topic') ? [] : ISLAMIC_TOOLS;
     const systemPrompt = this.buildPromptForIntent(intent, language, location);
 
-    // Stream from Gemini, accumulate full reply for cache + history
+    // Stream from Gemini, accumulate full reply for cache + history.
+    // If the agentic loop fails (e.g. context too large after several Q&A rounds),
+    // retry once with cleared history so the user gets an answer instead of an error.
     let fullReply = '';
     let media: ChatMedia | undefined;
-    try {
-      for await (const event of this.geminiService.runAgenticLoopStream(
+    let retried = false;
+
+    const runStream = async function* (self: ChatService, history: GeminiMessage[]): AsyncGenerator<StreamChunk> {
+      for await (const event of self.geminiService.runAgenticLoopStream(
         systemPrompt,
-        [...userHistory],
+        [...history],
         useTools,
       )) {
         if (event.type === 'media' && isChatMedia(event.media)) {
@@ -447,10 +471,30 @@ export class ChatService {
           yield { type: 'chunk', text: event.text };
         }
       }
+    };
+
+    try {
+      yield* runStream(this, userHistory);
     } catch (err) {
-      userHistory.pop();
-      yield { type: 'error', message: (err as Error).message };
-      return;
+      // ── Fallback: retry with cleared history ─────────────────────────────
+      // Context overflow from accumulated history is the most common cause.
+      // Clear this user's history and retry with just the current message.
+      this.logger.warn(
+        `Agentic stream failed for user ${userId}, retrying with cleared history: ${(err as Error).message}`,
+      );
+      retried = true;
+      this.history.set(userId, [{ role: 'user', parts: [{ text: message }] }]);
+      const freshHistory = this.history.get(userId) as GeminiMessage[];
+
+      try {
+        fullReply = '';
+        media = undefined;
+        yield* runStream(this, freshHistory);
+      } catch (retryErr) {
+        freshHistory.pop();
+        yield { type: 'error', message: (retryErr as Error).message };
+        return;
+      }
     }
 
     if (!fullReply.trim() && media) {
@@ -458,15 +502,17 @@ export class ChatService {
       yield { type: 'chunk', text: fullReply };
     }
 
-    userHistory.push({ role: 'model', parts: [{ text: fullReply }] });
+    const cleanReply = sanitizeModelOutput(fullReply);
+    const currentHistory = this.history.get(userId) as GeminiMessage[];
+    currentHistory.push({ role: 'model', parts: [{ text: truncateForHistory(cleanReply) }] });
 
-    if (!skipCache && (fullReply.trim() || media)) {
+    if (!skipCache && (cleanReply.trim() || media)) {
       this.ragService
-        .saveToCache(normalizedMessage, fullReply, embedding, media)
+        .saveToCache(normalizedMessage, cleanReply, embedding, media)
         .catch((err) => this.logger.warn(`Cache save failed: ${(err as Error).message}`));
     }
 
-    yield { type: 'done', source: 'model', similarity: null, media };
+    yield { type: 'done', source: retried ? 'model' : 'model', similarity: null, media };
   }
 
   async getRawTafsir(

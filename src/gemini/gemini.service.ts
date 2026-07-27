@@ -76,6 +76,42 @@ interface GeminiTtsResponse {
   }>;
 }
 
+/**
+ * Sanitizes Gemini model text output by stripping internal thinking artifacts
+ * (`tool_code` blocks, `thought` monologues, Python print statements, etc.).
+ */
+export function sanitizeModelOutput(text: string): string {
+  if (!text) return '';
+  let cleaned = text;
+
+  // 1. Fenced tool_code / python blocks
+  cleaned = cleaned.replace(/```(?:tool_code|python)?[\s\S]*?```/gi, '');
+
+  // 2. Un-fenced tool_code blocks & lines
+  cleaned = cleaned.replace(/(?:^|\n)tool_code\s*\n\s*print\(default_api[\s\S]*?(?=\bthought\b|\n[A-Z\u00C0-\u024F\u0980-\u09FF\u0600-\u06FF\u0400-\u04FF]|$)/gi, '');
+  cleaned = cleaned.replace(/(?:^|\n)tool_code\s*\n[^\n]*/gi, '');
+
+  // 3. Thought monologue: if text starts with thought, strip thought lines & internal monologues
+  if (/^\s*(?:tool_code\s*\n)*thought\b/i.test(cleaned)) {
+    // Remove "thought" keyword
+    cleaned = cleaned.replace(/^\s*(?:tool_code\s*\n)*thought\s*\n?/i, '');
+
+    // Strip internal monologue sentences until the answer transition
+    cleaned = cleaned.replace(
+      /^[\s\S]*?\b(?:Indonesian|Bengali|Arabic|Turkish|English|Spanish|French|Russian|Chinese|language)\.\s*/i,
+      '',
+    );
+
+    // If double newline separates thought from answer
+    cleaned = cleaned.replace(/^(?:The user|I need|I also|After getting|I will|I must|Let's|First|Next|I should)[\s\S]*?\n\n/gi, '');
+  }
+
+  // Cleanup leftover header lines
+  cleaned = cleaned.replace(/^\s*(?:tool_code|thought)\s*\n?/gi, '');
+
+  return cleaned.trim();
+}
+
 @Injectable()
 export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
@@ -462,7 +498,7 @@ export class GeminiService {
       const functionCallParts = parts.filter((p) => 'functionCall' in p && p.functionCall);
 
       if (functionCallParts.length === 0) {
-        return { text: result.response.text(), media: media.length ? media : undefined };
+        return { text: sanitizeModelOutput(result.response.text()), media: media.length ? media : undefined };
       }
 
       const responses = await Promise.all(
@@ -495,7 +531,7 @@ export class GeminiService {
       );
     }
 
-    return { text: result.response.text(), media: media.length ? media : undefined };
+    return { text: sanitizeModelOutput(result.response.text()), media: media.length ? media : undefined };
   }
 
   async *runAgenticLoopStream(
@@ -576,31 +612,65 @@ export class GeminiService {
     for (let i = 0; i < maxIterations; i++) {
       const streamResult = await chatSession.sendMessageStream(pendingMessage);
 
-      // Iterate stream chunks immediately — yield text as it arrives (true streaming).
-      // If a function-call chunk is detected, break and handle it synchronously.
       let isFunctionCallTurn = false;
-      let streamedText = '';
+      let turnTextBuffer = '';
+      const turnChunks: string[] = [];
+
       for await (const chunk of streamResult.stream) {
         const chunkParts = chunk.candidates?.[0]?.content?.parts ?? [];
-        if (chunkParts.some((p) => 'functionCall' in p && p.functionCall)) {
+        if (
+          chunkParts.some(
+            (p) =>
+              ('functionCall' in p && p.functionCall) ||
+              (p as { thought?: boolean }).thought === true,
+          )
+        ) {
           isFunctionCallTurn = true;
           break;
         }
         const text = chunk.text();
         if (text) {
-          streamedText += text;
-          yield { type: 'chunk', text };
+          turnTextBuffer += text;
+          turnChunks.push(text);
         }
       }
 
       if (!isFunctionCallTurn) {
-        if (!streamedText) {
-          const response = await streamResult.response;
-          const text = response.text();
-          if (text) yield { type: 'chunk', text };
+        if (!turnTextBuffer) {
+          try {
+            const response = await streamResult.response;
+            const text = response.text();
+            if (text) turnTextBuffer = text;
+          } catch {
+            // Ignore response fetch error if stream was empty
+          }
         }
 
-        return; // Text turn fully streamed
+        let inThinkingHeader = true;
+        let accumulatedHeaderBuffer = '';
+
+        for (const rawChunk of turnChunks) {
+          if (!inThinkingHeader) {
+            yield { type: 'chunk', text: rawChunk };
+            continue;
+          }
+
+          accumulatedHeaderBuffer += rawChunk;
+          const cleaned = sanitizeModelOutput(accumulatedHeaderBuffer);
+          if (cleaned) {
+            yield { type: 'chunk', text: cleaned };
+            inThinkingHeader = false;
+          }
+        }
+
+        if (turnChunks.length === 0 && turnTextBuffer) {
+          const cleaned = sanitizeModelOutput(turnTextBuffer);
+          if (cleaned) {
+            yield { type: 'chunk', text: cleaned };
+          }
+        }
+
+        return; // Text turn fully processed and streamed
       }
 
       // Resolve full response to get complete function call args
@@ -653,3 +723,4 @@ export class GeminiService {
     return null;
   }
 }
+
